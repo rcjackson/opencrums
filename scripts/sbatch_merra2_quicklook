@@ -1,0 +1,11 @@
+#!/bin/bash -l
+#SBATCH -N 1        
+#SBATCH --time=12:00:00
+#SBATCH --job-name=download_era
+#SBATCH -n 1
+
+# Environment variables
+export MPLBACKEND="agg"
+conda activate pyart-2021
+cd /lcrc/group/earthscience/rjackson/opencrums/scripts
+python gen_merra_quicklooks.py 2011

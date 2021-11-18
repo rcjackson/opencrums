@@ -135,6 +135,10 @@ if __name__ == '__main__':
     ax[0,3].set_ylabel('Longitude [deg]')
     ax[0,3].set_title('PC7 %5.2f' % (variance[6] * 100.))
     ax[0,3].coastlines()
+    if len(components) < 8:
+        ds.close()
+        fig.savefig(out_path + '/pngs/%s.png' % variable)
+        sys.exit(0)
     plt.colorbar(c, ax=ax[0, 3])
     c = ax[1,3].pcolormesh(x, y, components[7], cmap='coolwarm', vmin=-0.2,
             vmax=0.2)
@@ -144,6 +148,7 @@ if __name__ == '__main__':
     ax[1,3].coastlines()
     if len(components) < 9:
         ds.close()
+        fig.savefig(out_path + '/pngs/%s.png' % variable)
         sys.exit(0)
     plt.colorbar(c, ax=ax[1, 3])
     c = ax[0,4].pcolormesh(x, y, components[8], cmap='coolwarm', vmin=-0.2,
@@ -154,6 +159,7 @@ if __name__ == '__main__':
     ax[0,4].coastlines()
     if len(components) < 10:
         ds.close()
+        fig.savefig(out_path + '/pngs/%s.png' % variable)
         sys.exit(0)
     plt.colorbar(c, ax=ax[0, 4])
     c = ax[1,4].pcolormesh(x, y, components[9], cmap='coolwarm', vmin=-0.2,

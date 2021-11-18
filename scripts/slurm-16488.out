@@ -1,0 +1,63 @@
+/bin/bash: /home/rjackson/anaconda3/lib/libtinfo.so.6: no version information available (required by /bin/bash)
+<xarray.Dataset>
+Dimensions:    (lon: 576, lat: 361, time: 8760)
+Coordinates:
+  * lon        (lon) float64 -180.0 -179.4 -178.8 -178.1 ... 178.1 178.8 179.4
+  * lat        (lat) float64 -90.0 -89.5 -89.0 -88.5 ... 88.5 89.0 89.5 90.0
+  * time       (time) datetime64[ns] 2018-01-01T00:30:00 ... 2018-12-31T23:30:00
+Data variables: (12/50)
+    BCANGSTR   (time, lat, lon) float32 dask.array<chunksize=(24, 361, 576), meta=np.ndarray>
+    BCCMASS    (time, lat, lon) float32 dask.array<chunksize=(24, 361, 576), meta=np.ndarray>
+    BCEXTTAU   (time, lat, lon) float32 dask.array<chunksize=(24, 361, 576), meta=np.ndarray>
+    BCFLUXU    (time, lat, lon) float32 dask.array<chunksize=(24, 361, 576), meta=np.ndarray>
+    BCFLUXV    (time, lat, lon) float32 dask.array<chunksize=(24, 361, 576), meta=np.ndarray>
+    BCSCATAU   (time, lat, lon) float32 dask.array<chunksize=(24, 361, 576), meta=np.ndarray>
+    ...         ...
+    SUFLUXU    (time, lat, lon) float32 dask.array<chunksize=(24, 361, 576), meta=np.ndarray>
+    SUFLUXV    (time, lat, lon) float32 dask.array<chunksize=(24, 361, 576), meta=np.ndarray>
+    SUSCATAU   (time, lat, lon) float32 dask.array<chunksize=(24, 361, 576), meta=np.ndarray>
+    TOTANGSTR  (time, lat, lon) float32 dask.array<chunksize=(24, 361, 576), meta=np.ndarray>
+    TOTEXTTAU  (time, lat, lon) float32 dask.array<chunksize=(24, 361, 576), meta=np.ndarray>
+    TOTSCATAU  (time, lat, lon) float32 dask.array<chunksize=(24, 361, 576), meta=np.ndarray>
+Attributes: (12/30)
+    History:                           Original file generated: Wed Jan 17 06...
+    Comment:                           GMAO filename: d5124_m2_jan10.tavg1_2d...
+    Filename:                          MERRA2_400.tavg1_2d_aer_Nx.20180101.nc4
+    Conventions:                       CF-1
+    Institution:                       NASA Global Modeling and Assimilation ...
+    References:                        http://gmao.gsfc.nasa.gov
+    ...                                ...
+    Contact:                           http://gmao.gsfc.nasa.gov
+    identifier_product_doi:            10.5067/KLICLTZ8EM9D
+    RangeBeginningDate:                2018-01-01
+    RangeBeginningTime:                00:00:00.000000
+    RangeEndingDate:                   2018-01-01
+    RangeEndingTime:                   23:59:59.000000
+Processing BCCMASS
+Processing BCFLUXU
+Processing BCFLUXV
+Processing BCSMASS
+Processing DMSCMASS
+Processing DMSSMASS
+Processing DUCMASS
+Processing DUCMASS25
+Processing DUFLUXU
+Processing DUFLUXV
+Processing DUSMASS
+Processing DUSMASS25
+Processing OCCMASS
+Processing OCFLUXU
+Processing OCFLUXV
+Processing OCSMASS
+Processing SO2CMASS
+Processing SO2SMASS
+Processing SO4CMASS
+Processing SO4SMASS
+Processing SSCMASS
+Processing SSCMASS25
+Processing SSFLUXU
+Processing SSFLUXV
+Processing SSSMASS
+Processing SSSMASS25
+Processing SUFLUXU
+Processing SUFLUXV

@@ -11,7 +11,7 @@ def get_file(date):
     c = cdsapi.Client()
     year_str = '%04d' % date.year
     month_str = '%02d' % date.month
-    days = np.arange(0, 7, 1) + date.day
+    days = np.arange(0, 31, 1) + date.day
     if date.month == 2:
         if date.year % 4 > 0:
             days = days[days < 29]
@@ -23,8 +23,8 @@ def get_file(date):
         days = days[days < 32]
 
     day_array = [str(x) for x in days]
-    out_file = out_path + '/%s/%s/%s%s%s-%sera5.grib' % (year_str, month_str,
-            year_str, month_str, day_array[0], day_array[-1])
+    out_file = out_path + '/%s/%s%sera5.grib' % (year_str,
+            year_str, month_str)
     head, tail = os.path.split(out_file)
     if not os.path.isdir(head):
         os.makedirs(head)
@@ -34,7 +34,8 @@ def get_file(date):
             {
             'product_type': 'reanalysis',
             'format': 'grib',
-            'variable': [
+            'variable': ['divergence', 'fraction_of_cloud_cover',
+                'potential_vorticity',
                 'geopotential', 'temperature',
                 'relative_humidity',
                 'specific_cloud_ice_water_content', 'specific_cloud_liquid_water_content', 'specific_humidity',
@@ -61,9 +62,5 @@ for year in [2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020]:
 #for year in [2017]:
 #    for month in [6, 7, 8, 9]:
         the_day = datetime(year, month, 1, 1, 1, 1)
-        end_day = the_day + relativedelta.relativedelta(months=1)
-        while the_day < end_day:
-            print('Retrieving %s' % str(the_day))
-            get_file(the_day)
-            the_day = the_day + timedelta(days=15)
-
+        print('Retrieving %s' % str(the_day))
+        get_file(the_day)

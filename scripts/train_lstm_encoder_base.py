@@ -5,7 +5,8 @@ import xarray as xr
 import numpy as np
 
 from tensorflow.keras.layers import BatchNormalization
-from tensorflow.keras.layers import Input, Conv2D, MaxPooling2D, UpSampling2D, Flatten, Reshape, Add, ReLU, Conv2DTranspose, Dense
+from tensorflow.keras.layers import Input, Conv2D, MaxPooling2D, UpSampling2D, Flatten, Reshape, Add, ReLU, Conv2DTranspose, Dense, Dropout
+from tensorflow.keras.layers import TimeDistributed, LSTM, RepeatVector
 from tensorflow.distribute import MirroredStrategy
 from tensorflow.keras.callbacks import ModelCheckpoint
 from tensorflow.keras.optimizers import Adam
@@ -28,52 +29,45 @@ variable_list = ["BCCMASS", "BCFLUXU", "BCFLUXV",
 
 
 def multiencoder_model(shape, var, the_dict):
-    width = shape[2]
-    height = shape[1]
-    inp_layer = Input(shape=(height, width, 1), name=var)
-    for i in range(the_dict['num_layers']):
-        conv2d_1 = Conv2D(the_dict['num_channels'],
-                (the_dict['window_size'], the_dict['window_size']), activation=the_dict['activation'], padding='same',
-                kernel_initializer='he_normal')(inp_layer)
-        mpool_1 = MaxPooling2D((the_dict['window_size'], the_dict['window_size']))(conv2d_1)
-    
-    conv2d_1 = Conv2D(1, (the_dict['window_size'], the_dict['window_size']), activation=the_dict['activation'],
-            padding='same',
-            kernel_initializer='he_normal')(mpool_1)
-    flat_1 = Flatten()(mpool_1)
-    encoding = Dense(the_dict['num_dimensions'], name="encoding")(flat_1)
-    encoding = Dense(height/4 * width/4)(encoding)
-    dense_1 = Reshape(target_shape=(int(height/4), int(width/4), 1))(encoding)
-    for i in range(the_dict['num_layers']):
-        conv2d_1 = Conv2D(the_dict['num_channels'],
-                (the_dict['window_size'], the_dict['window_size']), activation=the_dict['activation'], padding='same',
-                kernel_initializer='he_normal')(dense_1)
-        mpool_1 = UpSampling2D((the_dict['window_size'], the_dict['window_size']))(conv2d_1)
-    output = Conv2D(1, (the_dict['window_size', the_dict['window_size']), activation=the_dict['activation'],
-            padding='same',
-            kernel_initializer='he_normal')(mpool_1)
-    
+    width = shape[3]
+    height = shape[2]
+    inp_layer = Input(shape=(the_dict['num_timesteps'], height, width), name=var)
+    lstm_input = Reshape(target_shape=(the_dict['num_timesteps'], height*width))(inp_layer)
+    encoding = LSTM(the_dict['num_channels'], activation=the_dict['activation'],
+            input_shape=(the_dict['num_timesteps'], height * width))(lstm_input)
+    repeat = RepeatVector(the_dict['num_timesteps'])(encoding)
+    decoder = LSTM(the_dict['num_channels'], activation=the_dict['activation'],
+            return_sequences=True)(repeat)
+    output = TimeDistributed(Dense(height * width))(decoder)
+    output = Reshape(target_shape=(the_dict['num_timesteps'], height, width))(output)
     return Model(inp_layer, output)
 
 tfrecords_path = '/lcrc/group/earthscience/rjackson/MERRA2/tfrecords/*.tfrecord'
 normalizers_path = '/lcrc/group/earthscience/rjackson/opencrums/models/normalizers/'
-def load_data():
-    ds = xr.open_mfdataset('/lcrc/group/earthscience/rjackson/MERRA2/hou_reduced/%s*.nc' % sys.argv[1])
+def load_data(num_timesteps):
+    ds = xr.open_mfdataset('/lcrc/group/earthscience/rjackson/MERRA2/hou_reduced/DUCMASS*.nc')
+    ds = ds.sortby('time')
     print(ds)
-    x = ds[sys.argv[1]].values
+    x = ds["DUCMASS"].values
+    old_shape = x.shape
+    # Make sure that we can divide our dataset into the given intervals
+    x = x[:(int(old_shape[0] / num_timesteps) * num_timesteps), :, :]
     old_shape = x.shape
     scaler = StandardScaler()
-    scaler.fit(np.reshape(x, (old_shape[0], old_shape[1] * old_shape[2])))
+    scaler.fit(np.reshape(x, (int(old_shape[0]), old_shape[1] * old_shape[2])))
     x = scaler.transform(np.reshape(x, (old_shape[0], old_shape[1] * old_shape[2])))
-    x = np.reshape(x, old_shape)
+    new_shape = (int(old_shape[0]/num_timesteps), num_timesteps,
+        old_shape[1], old_shape[2])
+    x = np.reshape(x, new_shape)
     x_dataset = tf.data.Dataset.from_tensor_slices((x, x))
     shape = x.shape
     return x_dataset, shape
 
 
 def run(config: dict):
-    x_ds, shape = load_data()
+    x_ds, shape = load_data(config['num_timesteps'])
     model = multiencoder_model(shape, sys.argv[1], config)
+    model.summary()
     x_ds = x_ds.batch(config["batch_size"])
     model.compile(optimizer=Adam(lr=config["learning_rate"]),
         loss="mean_squared_error", metrics=['mse'])
@@ -84,23 +78,20 @@ default_config = {
         "num_epochs": 100,
         "num_channels": 16,
         "learning_rate": 1e-3,
-        "num_dimensions": 8,
+        "num_timesteps": 4,
         "activation": "relu",
-        "batch_size": 16
-        "num_layers": 2
-        "window_size": 2}
+        "batch_size": 16}
 
 if not ray.is_initialized():
     ray.init(num_cpus=8, num_gpus=8, log_to_driver=False)
     run_default = ray.remote(num_cpus=1, num_gpus=1)(run)
     objective_default = ray.get(run_default.remote(default_config))
-
+#run(default_config)
 print(f"MSE Default Configuration:  {objective_default:.3f}")
 
 problem = HpProblem()
-problem.add_hyperparameter((20, 400), "num_epochs")
-problem.add_hyperparameter((4, 20), "num_dimensions")
-problem.add_hyperparameter((1, 2), "num_layers")
+problem.add_hyperparameter((20, 500), "num_epochs")
+problem.add_hyperparameter((4, 20), "num_timesteps")
 problem.add_hyperparameter((4, 256, "log-uniform"), "num_channels")
 # Categorical hyperparameter (sampled with uniform prior)
 ACTIVATIONS = [
@@ -110,7 +101,7 @@ ACTIVATIONS = [
 problem.add_hyperparameter(ACTIVATIONS, "activation")
 problem.add_hyperparameter((1e-5, 1e-2, "log-uniform"), "learning_rate")
 problem.add_hyperparameter((8, 256, "log-uniform"), "batch_size")
-problem.add_hyperparameter((2, 2), "window_size")
+
 problem.add_starting_point(**default_config)
 
 method_kwargs = {
@@ -126,5 +117,5 @@ method_kwargs["num_gpus_per_task"] = 1
 
 evaluator = Evaluator.create(run, method="ray", method_kwargs=method_kwargs)
 search = AMBS(problem, evaluator)
-results = search.search(250)
-results.to_csv('hpsearch_results_%s.csv' % sys.argv[1])
+results = search.search(100)
+results.to_csv('hpsearch_results_lstm.csv')

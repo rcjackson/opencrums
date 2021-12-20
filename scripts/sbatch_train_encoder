@@ -1,11 +1,11 @@
 #!/bin/bash -l
 #SBATCH -N 1        
-#SBATCH --time=12:00:00
+#SBATCH --time=72:00:00
 #SBATCH --job-name=train_encoder
 #SBATCH -n 1
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:8
 # Environment variables
 export MPLBACKEND="agg"
 conda activate tensorflow_env
 cd /lcrc/group/earthscience/rjackson/opencrums/scripts
-python train_multi_encoder.py DMSSMASS
+python train_classifier.py DUFLUXV

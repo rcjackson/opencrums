@@ -3,6 +3,8 @@ import sys
 import ray
 import xarray as xr
 import numpy as np
+import matplotlib.pyplot as plt
+import cartopy.crs as ccrs
 
 from tensorflow.keras.layers import BatchNormalization
 from tensorflow.keras.layers import Input, Conv2D, MaxPooling2D, UpSampling2D, Flatten, Reshape, Add, ReLU, Conv2DTranspose, Dense, Dropout, BatchNormalization
@@ -10,6 +12,7 @@ from tensorflow.distribute import MirroredStrategy
 from tensorflow.keras.callbacks import ModelCheckpoint
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras import Model
+from tensorflow.keras.models import load_model
 from tensorflow.keras.regularizers import l2
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
@@ -58,10 +61,17 @@ def classifier_model(shape, var, the_dict):
 
 tfrecords_path = '/lcrc/group/earthscience/rjackson/MERRA2/tfrecords/*.tfrecord'
 normalizers_path = '/lcrc/group/earthscience/rjackson/opencrums/models/normalizers/'
+ds = xr.open_mfdataset('/lcrc/group/earthscience/rjackson/MERRA2/hou_reduced/DUCMASS*.nc')
+lat = ds.lat.values
+lon = ds.lon.values
+print(lat.shape, lon.shape)
+ds.close()
 
 def load_data():
-    ds = xr.open_mfdataset('/lcrc/group/earthscience/rjackson/MERRA2/hou_reduced/DUCMASS*.nc').sortby('time')
+    ds = xr.open_mfdataset('/lcrc/group/earthscience/rjackson/MERRA2/hou_reduced/DUCMASS*.nc')
     print(ds)
+    ds = ds.sortby('time')
+    time = ds.time.values
     x = ds["DUCMASS"].values
     old_shape = x.shape
     scaler = StandardScaler()
@@ -102,29 +112,21 @@ def load_data():
             'input_2': np.squeeze(x_test[:, :, :, 1]),
             'input_3': np.squeeze(x_test[:, :, :, 2])}
 
-    return x_dataset_train, x_dataset_test, y_train, y_test, shape
+    return x_dataset_train, x_dataset_test, y_train, y_test, shape, time
 
-
-def run(config: dict):
-    x_ds_train, x_ds_test, y_train, y_test, shape = load_data()
-    model = classifier_model(shape, sys.argv[1], config)
-    model.compile(optimizer=Adam(lr=config["learning_rate"]),
-        loss="categorical_crossentropy", metrics=['acc'])
-    model.summary() 
-    history = model.fit(
-            x_ds_train, y_train, 
-            validation_data=(x_ds_test, y_test), epochs=config["num_epochs"],
-            batch_size=config["batch_size"])
-    model.save('../models/classifier')
-    return history.history["val_acc"][-1]
-
-default_config = {
-        "num_epochs": 50,
-        "num_channels": 138,
-        "learning_rate": 0.000147,
-        "num_dense_nodes": 9,
-        "num_dense_layers": 3,
-        "activation": "relu",
-        "batch_size": 10,
-        "num_layers": 2}
-run(default_config)
+x_dataset_train, x_dataset_test, y_train, y_test, shape, time = load_data()
+model = load_model('../models/classifier')
+classes = np.argmax(model.predict(x_dataset_test), axis=1)
+for i in range(x_dataset_test['input_1'].shape[0]):
+    fig, ax = plt.subplots(1, 1, figsize=(10, 10),
+            subplot_kw=dict(projection=ccrs.PlateCarree()))
+    ax.contourf(lon, lat, x_dataset_test['input_1'][i], cmap='Reds')
+    ax.coastlines()
+    ax.streamplot(lon, lat, x_dataset_test['input_2'][i],
+            x_dataset_test['input_3'][i], color='k')
+    ax.set_xlabel("Lat")
+    ax.set_ylabel("Lon")
+    ax.set_title('Dust column mass %s ' % str(time[i]))
+    out_dir = '../models/classifier_outputs/%d/' % classes[i]
+    fig.savefig(out_dir + '%d.png' %i, dpi=300)
+    plt.close(fig)

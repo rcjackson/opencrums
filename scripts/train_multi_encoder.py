@@ -104,8 +104,8 @@ problem.add_hyperparameter((1, 2), "num_layers")
 problem.add_hyperparameter((4, 256, "log-uniform"), "num_channels")
 # Categorical hyperparameter (sampled with uniform prior)
 ACTIVATIONS = [
-    "elu", "gelu", "hard_sigmoid", "linear", "relu", "selu",
-    "sigmoid", "softplus", "softsign", "swish", "tanh",
+    "relu", "selu",
+    "sigmoid"
 ]
 problem.add_hyperparameter(ACTIVATIONS, "activation")
 problem.add_hyperparameter((1e-5, 1e-2, "log-uniform"), "learning_rate")

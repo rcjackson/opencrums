@@ -41,7 +41,7 @@ def classifier_model(shape, var, the_dict):
     flat_1 = Flatten()(mpool_1)
     for i in range(the_dict['num_dense_layers']):
         flat_1 = Dense(the_dict['num_dense_nodes'])(flat_1)
-    output = Dense(4, activation="softmax", name="class")(flat_1)
+    output = Dense(5, activation="softmax", name="class")(flat_1)
     return Model(inp_layer, output)
 
 tfrecords_path = '/lcrc/group/earthscience/rjackson/MERRA2/tfrecords/*.tfrecord'
@@ -56,7 +56,7 @@ def load_data():
     x = scaler.transform(np.reshape(x, (old_shape[0], old_shape[1] * old_shape[2])))
     x = np.reshape(x, old_shape)
     class_ds = xr.open_dataset('classification_dust.nc')
-    y = tf.one_hot(class_ds.classification.values, 4).numpy()
+    y = tf.one_hot(class_ds.classification.values, 5).numpy()
     x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.20)
     x_dataset_train = tf.data.Dataset.from_tensor_slices((x_train, y_train))
     x_dataset_test = tf.data.Dataset.from_tensor_slices((x_test, y_test))

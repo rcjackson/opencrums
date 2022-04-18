@@ -5,14 +5,32 @@ import pickle
 import cartopy.crs as ccrs
 import sys
 import cartopy.feature as cfeature
+import glob
+import pandas as pd
 
 from sklearn import preprocessing
 from sklearn.decomposition import PCA
 from distributed import LocalCluster, Client
+from datetime import datetime, timedelta
 
+titles = ['Good', 'Moderate', 'Unhealthy for Sensitive Groups', 'Unhealthy', 'Hazardous']
 if __name__ == '__main__':
     nc_path = '/lcrc/group/earthscience/rjackson/MERRA2/hou_reduced/'
-
+    air_now_data = glob.glob(
+            '/lcrc/group/earthscience/rjackson/epa_air_now/*.csv')
+    air_now_df = pd.concat(map(pd.read_csv, air_now_data))
+    air_now_df['datetime'] = pd.to_datetime(
+            air_now_df['DateObserved'] + ' 00:00:00')
+    air_now_df = air_now_df.set_index('datetime')
+    air_now_df = air_now_df.sort_index()
+    print(air_now_df['CategoryNumber'].values.min())
+    
+    def get_air_now_label(time):
+        if np.min(np.abs((air_now_df.index - time))) > timedelta(days=1):
+            return np.nan
+        ind = np.argmin(np.abs(air_now_df.index - time))
+        return air_now_df['CategoryNumber'].values[ind]
+    
     code = 'HOU'
     if code == 'HOU':
         ax_extent = [-105, -85, 25, 35]
@@ -45,9 +63,9 @@ if __name__ == '__main__':
         name='admin_1_states_provinces_lines',
         scale='50m',
         facecolor='none')
-    classification = xr.open_dataset('classification_dust.nc')
-    num_clusters = classification.classification.max().values
-    fig, ax = plt.subplots(int(num_clusters + 1), 1, figsize=(7, 15),
+    num_clusters = 5
+    classification = np.array([get_air_now_label(x) for x in ds.time.values])
+    fig, ax = plt.subplots(int(num_clusters), 1, figsize=(7, 15),
             subplot_kw={'projection': ccrs.PlateCarree()})
     vmin = ds.min().values
     vmax = ds.max().values
@@ -69,6 +87,24 @@ if __name__ == '__main__':
              int(lon_inds[0]):int(lon_inds[-1])]
         print(ds)
         streamlines = True
+    elif variable == "OCCMASS":
+        factor = 1e3
+        contours = np.linspace(0, 0.05, 30)
+        title_label = "OCCMASS [g/m^3]"
+        cmap = 'Reds'
+        # Load fluxes for streamline plot
+        dsu = xr.open_mfdataset(nc_path + 'OCFLUXU*.nc')['OCFLUXU']
+
+        dsu = dsu[:,
+             int(lat_inds[0]):int(lat_inds[-1]),
+            int(lon_inds[0]):int(lon_inds[-1])]
+        dsv = xr.open_mfdataset(nc_path + 'OCFLUXV*.nc')['OCFLUXV']
+
+        dsv = dsv[:,
+             int(lat_inds[0]):int(lat_inds[-1]),
+             int(lon_inds[0]):int(lon_inds[-1])]
+        print(ds)
+        streamlines = True 
     elif variable == "DUFLUXU" or variable == "DUFLUXV":
         factor = 1e3
         contours = np.linspace(-3, 3, 30)
@@ -77,8 +113,8 @@ if __name__ == '__main__':
         streamlines = False
     else:
         factor = 1
-    for i in range(int(num_clusters + 1)):
-        inds = np.argwhere(classification.classification.values == i)
+    for i in range(int(num_clusters)):
+        inds = np.argwhere(classification == i+1)
         x, y = np.meshgrid(lon, lat)
         mean = np.squeeze(np.mean(ds.values[inds, :, :], axis=0)) * factor
         
@@ -94,6 +130,6 @@ if __name__ == '__main__':
         ax[i].add_feature(cfeature.BORDERS)
         ax[i].add_feature(states_provinces)
         plt.colorbar(c, ax=ax[i])
-        ax[i].set_title(title_label)
+        ax[i].set_title(titles[i])
 
     fig.savefig('Clusters_%s.png' % variable)

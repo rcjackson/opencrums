@@ -1,6 +1,5 @@
 import tensorflow as tf
 import sys
-import ray
 import xarray as xr
 import numpy as np
 import matplotlib.pyplot as plt
@@ -8,7 +7,6 @@ import cartopy.crs as ccrs
 
 from tensorflow.keras.layers import BatchNormalization
 from tensorflow.keras.layers import Input, Conv2D, MaxPooling2D, UpSampling2D, Flatten, Reshape, Add, ReLU, Conv2DTranspose, Dense, Dropout, BatchNormalization
-from tensorflow.distribute import MirroredStrategy
 from tensorflow.keras.callbacks import ModelCheckpoint
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras import Model
@@ -17,10 +15,6 @@ from tensorflow.keras.regularizers import l2
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 from glob import glob
-from deephyper.problem import HpProblem
-from deephyper.evaluator import Evaluator
-from deephyper.evaluator.callback import LoggerCallback
-from deephyper.search.hps import AMBS
 
 variable_list = ["BCCMASS", "BCFLUXU", "BCFLUXV",
             "BCSMASS", "DMSCMASS", "DMSSMASS", 

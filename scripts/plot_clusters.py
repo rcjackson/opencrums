@@ -65,7 +65,7 @@ if __name__ == '__main__':
         facecolor='none')
     num_clusters = 5
     classification = np.array([get_air_now_label(x) for x in ds.time.values])
-    fig, ax = plt.subplots(int(num_clusters), 1, figsize=(7, 15),
+    fig, ax = plt.subplots(int(num_clusters), 1, figsize=(6, 14),
             subplot_kw={'projection': ccrs.PlateCarree()})
     vmin = ds.min().values
     vmax = ds.max().values
@@ -105,6 +105,24 @@ if __name__ == '__main__':
              int(lon_inds[0]):int(lon_inds[-1])]
         print(ds)
         streamlines = True 
+    elif variable == "BCCMASS":
+        factor = 1e3
+        contours = np.linspace(0, 0.003, 30)
+        title_label = "BCCMASS [g/m^3]"
+        cmap = 'Reds'
+        # Load fluxes for streamline plot
+        dsu = xr.open_mfdataset(nc_path + 'BCFLUXU*.nc')['BCFLUXU']
+
+        dsu = dsu[:,
+             int(lat_inds[0]):int(lat_inds[-1]),
+            int(lon_inds[0]):int(lon_inds[-1])]
+        dsv = xr.open_mfdataset(nc_path + 'BCFLUXV*.nc')['BCFLUXV']
+
+        dsv = dsv[:,
+             int(lat_inds[0]):int(lat_inds[-1]),
+             int(lon_inds[0]):int(lon_inds[-1])]
+        print(ds)
+        streamlines = True     
     elif variable == "DUFLUXU" or variable == "DUFLUXV":
         factor = 1e3
         contours = np.linspace(-3, 3, 30)

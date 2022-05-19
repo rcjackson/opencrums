@@ -5,17 +5,22 @@ import glob as glob
 import numpy as np
 import sys
 import pickle
+import ray
 
 from datetime import timedelta, datetime
 from tensorflow.keras.layers import BatchNormalization
 from tensorflow.keras.layers import Input, Conv2D, MaxPooling2D, UpSampling2D, Flatten, Reshape, Add, ReLU, Conv2DTranspose, Dense, Dropout, BatchNormalization
-from tensorflow.distribute import MirroredStrategy
 from tensorflow.keras.callbacks import ModelCheckpoint
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras import Model
 from tensorflow.keras.regularizers import l2
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
+from deephyper.problem import HpProblem
+from deephyper.evaluator import Evaluator
+from deephyper.evaluator.callback import LoggerCallback
+from deephyper.search.hps import AMBS
+
 
 air_now_data = glob.glob('/lcrc/group/earthscience/rjackson/epa_air_now/*.csv')
 air_now_df = pd.concat(map(pd.read_csv, air_now_data))
@@ -118,7 +123,8 @@ def run(config: dict):
     x_ds_test = {}
     y_train = []
     y_test = []
-    for species in config["species_list"]:
+    species_list = ['SS', 'SO4', 'SO2', 'OC','DU', 'DMS', 'BC']
+    for species in species_list:
         print(species)
         x_ds_train1, x_ds_test1, y_train, y_test, shape = load_data(species)
         x_ds_train.update(x_ds_train1)
@@ -146,9 +152,43 @@ default_config = {
         "num_dense_layers": 3,
         "activation": "relu",
         "batch_size": 10,
-        "num_layers": 2,
-        "species_list": ['SS', 'SO4', 'SO2', 'OC','DU', 'DMS', 'BC']}
+        "num_layers": 2}
 
-history = run(default_config)
-with open('../models/%s_history' % default_config["species"], 'wb') as out_file:
-    pickle.dump(history.history, out_file)
+if not ray.is_initialized():
+    ray.init(num_cpus=128, num_gpus=8, log_to_driver=False)
+
+run_default = ray.remote(num_cpus=16, num_gpus=1)(run)
+objective_default = ray.get(run_default.remote(default_config))
+
+
+problem = HpProblem()
+problem.add_hyperparameter((20, 200), "num_epochs")
+problem.add_hyperparameter((8, 512, "log-uniform"), "num_dense_nodes")
+problem.add_hyperparameter((1, 2), "num_layers")
+problem.add_hyperparameter((1, 8), "num_dense_layers")
+problem.add_hyperparameter((4, 256, "log-uniform"), "num_channels")
+# Categorical hyperparameter (sampled with uniform prior)
+ACTIVATIONS = [
+    "elu", "gelu", "hard_sigmoid", "linear", "relu", "selu",
+    "sigmoid", "softplus", "softsign", "swish", "tanh",
+]
+problem.add_hyperparameter(ACTIVATIONS, "activation")
+problem.add_hyperparameter((1e-5, 1e-2, "log-uniform"), "learning_rate")
+problem.add_hyperparameter((8, 256, "log-uniform"), "batch_size")
+
+method_kwargs = {
+        "num_cpus": 128,
+        "num_cpus_per_task": 16,
+        "callbacks": [LoggerCallback()]
+    }
+
+method_kwargs["num_cpus"] = 128
+method_kwargs["num_gpus"] = 8
+method_kwargs["num_cpus_per_task"] = 32
+method_kwargs["num_gpus_per_task"] = 2
+
+evaluator = Evaluator.create(run, method="ray", method_kwargs=method_kwargs)
+search = AMBS(problem, evaluator)
+results = search.search(200)
+results.to_csv('hpsearch_results_classifieraqi.csv')
+

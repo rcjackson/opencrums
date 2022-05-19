@@ -1,11 +1,12 @@
 #!/bin/bash -l
 #SBATCH -N 1        
-#SBATCH --time=24:00:00
+#SBATCH --time=72:00:00
 #SBATCH --job-name=train_encoder
 #SBATCH -n 1
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:8
 # Environment variables
+
 export MPLBACKEND="agg"
-conda activate tensorflow_env
+conda activate xgboost_env_gpu
 cd /lcrc/group/earthscience/rjackson/opencrums/scripts
-python train_aqi_classifier_all_species.py
+python train_aqi_classifier_xgboost.py

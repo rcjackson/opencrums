@@ -12,7 +12,7 @@ from glob import glob
 
 if __name__ == "__main__":
     in_merra_path = '/lcrc/group/earthscience/rjackson/MERRA2/%s/*.nc4' % sys.argv[1]
-    out_path = '/lcrc/group/earthscience/rjackson/MERRA2/hou_reduced/'
+    out_path = '/lcrc/group/earthscience/rjackson/MERRA2/se_reduced/'
     
     variable_list = ["BCCMASS", "BCFLUXU", "BCFLUXV",
         "BCSMASS", "DMSCMASS", "DMSSMASS", 

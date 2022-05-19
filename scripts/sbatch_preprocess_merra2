@@ -5,7 +5,8 @@
 #SBATCH -n 1
 #SBATCH --gres=gpu:1
 # Environment variables
+
 export MPLBACKEND="agg"
-conda activate tensorflow_env
+conda activate xgboost_env
 cd /lcrc/group/earthscience/rjackson/opencrums/scripts
-python preprocess_merra2.py 2012
+python preprocess_merra2.py 2019

@@ -5,7 +5,7 @@ import glob as glob
 import numpy as np
 import sys
 import pickle
-import ray
+#import ray
 
 from datetime import timedelta, datetime
 from tensorflow.keras.layers import BatchNormalization
@@ -21,13 +21,21 @@ from deephyper.evaluator import Evaluator
 from deephyper.evaluator.callback import LoggerCallback
 from deephyper.search.hps import AMBS
 
+CBSA = "Huntsville, AL"
 
-air_now_data = glob.glob('/lcrc/group/earthscience/rjackson/epa_air_now/*.csv')
+def get_category_number(x):
+    category_dict = {'Good': 0, 'Moderate': 1, 'Unhealthy for Sensitive Groups': 2,
+                     'Unhealthy': 3, 'Hazardous': 4}
+    return category_dict[x]
+
+air_now_data = glob.glob('/lcrc/group/earthscience/rjackson/epa_air_now_atl/*.csv')
 air_now_df = pd.concat(map(pd.read_csv, air_now_data))
-air_now_df['datetime'] = pd.to_datetime(air_now_df['DateObserved'] + ' 00:00:00')
-air_now_df = air_now_df.set_index('datetime')
+air_now_df['datetime'] = pd.to_datetime(air_now_df['Date'] + ' 00:00:00')
+air_now_df = air_now_df.set_index(['CBSA', 'datetime'])
 air_now_df = air_now_df.sort_index()
-print(air_now_df['CategoryNumber'].values.min())
+print(air_now_df)
+air_now_df = air_now_df.loc[CBSA, :]
+air_now_df['CategoryNumber'] = air_now_df['Category'].apply(get_category_number)
 
 def get_air_now_label(time):
     if np.min(np.abs((air_now_df.index - time))) > timedelta(days=1):
@@ -35,9 +43,10 @@ def get_air_now_label(time):
     ind = np.argmin(np.abs(air_now_df.index - time))
     return air_now_df['CategoryNumber'].values[ind]
 
+site = "se"
 
 def load_data(species):
-    ds = xr.open_mfdataset('/lcrc/group/earthscience/rjackson/MERRA2/hou_reduced/%sCMASS*.nc' % species).sortby('time')
+    ds = xr.open_mfdataset('/lcrc/group/earthscience/rjackson/MERRA2/%s_reduced/%sCMASS*.nc' % (site, species)).sortby('time')
     print(ds)
     times = np.array(list(map(pd.to_datetime, ds.time.values)))
     x = ds["%sCMASS" % species].values
@@ -54,7 +63,7 @@ def load_data(species):
        inp = "SU"
     else:
        inp = species
-    ds = xr.open_mfdataset('/lcrc/group/earthscience/rjackson/MERRA2/hou_reduced/%sFLUXU*.nc' % inp).sortby('time')
+    ds = xr.open_mfdataset('/lcrc/group/earthscience/rjackson/MERRA2/%s_reduced/%sFLUXU*.nc' % (site, inp)).sortby('time')
     x2 = ds["%sFLUXU" % inp].values
     scaler = StandardScaler()
     scaler.fit(np.reshape(x2, (old_shape[0], old_shape[1] * old_shape[2])))
@@ -63,7 +72,7 @@ def load_data(species):
     x2 = np.reshape(x2, old_shape)
     inputs[:, :, :, 1] = x2
     ds.close()
-    ds = xr.open_mfdataset('/lcrc/group/earthscience/rjackson/MERRA2/hou_reduced/%sFLUXV*.nc' % inp).sortby('time')
+    ds = xr.open_mfdataset('/lcrc/group/earthscience/rjackson/MERRA2/%s_reduced/%sFLUXV*.nc' % (site, inp)).sortby('time')
     x2 = ds["%sFLUXV" % inp].values
     scaler = StandardScaler()
     scaler.fit(np.reshape(x2, (old_shape[0], old_shape[1] * old_shape[2])))
@@ -74,7 +83,7 @@ def load_data(species):
     classification = np.array(list(map(get_air_now_label, times)))
     where_valid = np.isfinite(classification)
     inputs = inputs[where_valid, :, :, :]
-    classification = classification[where_valid]
+    classification = classification[where_valid] - 1
     y = tf.one_hot(classification, 5).numpy()
     x_train, x_test, y_train, y_test = train_test_split(
             inputs, y, test_size=0.20, random_state=3)
@@ -141,18 +150,19 @@ def run(config: dict):
             x_ds_train, y_train, 
             validation_data=(x_ds_test, y_test), epochs=config["num_epochs"],
             batch_size=config["batch_size"], class_weight=class_weight)
-    model.save('../models/classifier')
+    model.save('../models/classifier-%s' % site)
     return history.history
 
 default_config = {
-        "num_epochs": 200,
-        "num_channels": 128,
+        "num_epochs": 25,
+        "num_channels": 32,
         "learning_rate": 0.0001,
-        "num_dense_nodes": 8,
+        "num_dense_nodes": 64,
         "num_dense_layers": 3,
         "activation": "relu",
-        "batch_size": 10,
-        "num_layers": 2}
+        "batch_size": 16,
+        "num_layers": 4}
+
 
 if not ray.is_initialized():
     ray.init(num_cpus=128, num_gpus=8, log_to_driver=False)
@@ -183,12 +193,12 @@ method_kwargs = {
     }
 
 method_kwargs["num_cpus"] = 128
-method_kwargs["num_gpus"] = 8
-method_kwargs["num_cpus_per_task"] = 32
-method_kwargs["num_gpus_per_task"] = 2
+method_kwargs["num_gpus"] = 4
+method_kwargs["num_cpus_per_task"] = 16
+method_kwargs["num_gpus_per_task"] = 1
 
 evaluator = Evaluator.create(run, method="ray", method_kwargs=method_kwargs)
 search = AMBS(problem, evaluator)
-results = search.search(200)
+results = search.search(50)
 results.to_csv('hpsearch_results_classifieraqi.csv')
-
+"""

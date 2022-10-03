@@ -21,21 +21,16 @@ from deephyper.evaluator import Evaluator
 from deephyper.evaluator.callback import LoggerCallback
 from deephyper.search.hps import AMBS
 
-CBSA = "Huntsville, AL"
+CBSA = "Houston, TX"
 
-def get_category_number(x):
-    category_dict = {'Good': 0, 'Moderate': 1, 'Unhealthy for Sensitive Groups': 2,
-                     'Unhealthy': 3, 'Hazardous': 4}
-    return category_dict[x]
-
-air_now_data = glob.glob('/lcrc/group/earthscience/rjackson/epa_air_now_atl/*.csv')
+air_now_data = glob.glob('/lcrc/group/earthscience/rjackson/epa_air_now/*.csv')
 air_now_df = pd.concat(map(pd.read_csv, air_now_data))
-air_now_df['datetime'] = pd.to_datetime(air_now_df['Date'] + ' 00:00:00')
-air_now_df = air_now_df.set_index(['CBSA', 'datetime'])
+air_now_df['datetime'] = pd.to_datetime(air_now_df['DateObserved'] + ' 00:00:00')
+air_now_df = air_now_df.set_index('datetime')
 air_now_df = air_now_df.sort_index()
-print(air_now_df)
-air_now_df = air_now_df.loc[CBSA, :]
-air_now_df['CategoryNumber'] = air_now_df['Category'].apply(get_category_number)
+print(air_now_df['CategoryNumber'].values.min())
+
+lag = int(sys.argv[1])
 
 def get_air_now_label(time):
     if np.min(np.abs((air_now_df.index - time))) > timedelta(days=1):
@@ -84,6 +79,10 @@ def load_data(species):
     where_valid = np.isfinite(classification)
     inputs = inputs[where_valid, :, :, :]
     classification = classification[where_valid] - 1
+    if lag > 0:
+        classification = classification[lag:]
+        inputs = inputs[:(-lag), :, : :]
+    print(inputs.shape, classification.shape)
     y = tf.one_hot(classification, 5).numpy()
     x_train, x_test, y_train, y_test = train_test_split(
             inputs, y, test_size=0.20, random_state=3)
@@ -132,7 +131,7 @@ def run(config: dict):
     x_ds_test = {}
     y_train = []
     y_test = []
-    species_list = ['SS', 'SO4', 'SO2', 'OC','DU', 'DMS', 'BC']
+    species_list = ['SS', 'SO4', 'SO2', 'OC', 'DU', 'DMS', 'BC']
     for species in species_list:
         print(species)
         x_ds_train1, x_ds_test1, y_train, y_test, shape = load_data(species)
@@ -150,11 +149,11 @@ def run(config: dict):
             x_ds_train, y_train, 
             validation_data=(x_ds_test, y_test), epochs=config["num_epochs"],
             batch_size=config["batch_size"], class_weight=class_weight)
-    model.save('../models/classifier-%s' % site)
+    model.save('../models/classifier-%s-lag-%d' % (site, lag))
     return history.history
 
 default_config = {
-        "num_epochs": 25,
+        "num_epochs": 250,
         "num_channels": 32,
         "learning_rate": 0.0001,
         "num_dense_nodes": 64,
@@ -164,41 +163,41 @@ default_config = {
         "num_layers": 4}
 
 
-if not ray.is_initialized():
-    ray.init(num_cpus=128, num_gpus=8, log_to_driver=False)
+#if not ray.is_initialized():
+#    ray.init(num_cpus=128, num_gpus=8, log_to_driver=False)
 
-run_default = ray.remote(num_cpus=16, num_gpus=1)(run)
-objective_default = ray.get(run_default.remote(default_config))
+run(default_config)
+#run_default = ray.remote(num_cpus=16, num_gpus=1)(run)
+#objective_default = ray.get(run_default.remote(default_config))
 
 
-problem = HpProblem()
-problem.add_hyperparameter((20, 200), "num_epochs")
-problem.add_hyperparameter((8, 512, "log-uniform"), "num_dense_nodes")
-problem.add_hyperparameter((1, 2), "num_layers")
-problem.add_hyperparameter((1, 8), "num_dense_layers")
-problem.add_hyperparameter((4, 256, "log-uniform"), "num_channels")
+#problem = HpProblem()
+#problem.add_hyperparameter((20, 200), "num_epochs")
+#problem.add_hyperparameter((8, 512, "log-uniform"), "num_dense_nodes")
+#problem.add_hyperparameter((1, 2), "num_layers")
+#problem.add_hyperparameter((1, 8), "num_dense_layers")
+#problem.add_hyperparameter((4, 256, "log-uniform"), "num_channels")
 # Categorical hyperparameter (sampled with uniform prior)
-ACTIVATIONS = [
-    "elu", "gelu", "hard_sigmoid", "linear", "relu", "selu",
-    "sigmoid", "softplus", "softsign", "swish", "tanh",
-]
-problem.add_hyperparameter(ACTIVATIONS, "activation")
-problem.add_hyperparameter((1e-5, 1e-2, "log-uniform"), "learning_rate")
-problem.add_hyperparameter((8, 256, "log-uniform"), "batch_size")
+#ACTIVATIONS = [
+#    "elu", "gelu", "hard_sigmoid", "linear", "relu", "selu",
+#    "sigmoid", "softplus", "softsign", "swish", "tanh",
+#]
+#problem.add_hyperparameter(ACTIVATIONS, "activation")
+#problem.add_hyperparameter((1e-5, 1e-2, "log-uniform"), "learning_rate")
+#problem.add_hyperparameter((8, 256, "log-uniform"), "batch_size")
 
-method_kwargs = {
-        "num_cpus": 128,
-        "num_cpus_per_task": 16,
-        "callbacks": [LoggerCallback()]
-    }
+#method_kwargs = {
+#        "num_cpus": 128,
+#        "num_cpus_per_task": 16,
+#        "callbacks": [LoggerCallback()]
+#    }
 
-method_kwargs["num_cpus"] = 128
-method_kwargs["num_gpus"] = 4
-method_kwargs["num_cpus_per_task"] = 16
-method_kwargs["num_gpus_per_task"] = 1
+#method_kwargs["num_cpus"] = 128
+#method_kwargs["num_gpus"] = 4
+#method_kwargs["num_cpus_per_task"] = 16
+#method_kwargs["num_gpus_per_task"] = 1
 
-evaluator = Evaluator.create(run, method="ray", method_kwargs=method_kwargs)
-search = AMBS(problem, evaluator)
-results = search.search(50)
-results.to_csv('hpsearch_results_classifieraqi.csv')
-"""
+#evaluator = Evaluator.create(run, method="ray", method_kwargs=method_kwargs)
+#search = AMBS(problem, evaluator)
+#results = search.search(50)
+#results.to_csv('hpsearch_results_classifieraqi.csv')

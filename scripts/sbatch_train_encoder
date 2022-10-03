@@ -9,31 +9,5 @@
 export MPLBACKEND="agg"
 conda activate pydda_env
 cd /lcrc/group/earthscience/rjackson/opencrums/scripts
-python train_multi_encoder_optimized.py BCCMASS
-python train_multi_encoder_optimized.py BCFLUXU
-python train_multi_encoder_optimized.py BCFLUXV
-python train_multi_encoder_optimized.py BCSMASS
-python train_multi_encoder_optimized.py DMSCMASS
-python train_multi_encoder_optimized.py DMSSMASS
-python train_multi_encoder_optimized.py DUCMASS
-python train_multi_encoder_optimized.py DUCMASS25
-python train_multi_encoder_optimized.py DUFLUXU
-python train_multi_encoder_optimized.py DUFLUXV
-python train_multi_encoder_optimized.py DUSMASS
-python train_multi_encoder_optimized.py DUSMASS25
-python train_multi_encoder_optimized.py OCCMASS
-python train_multi_encoder_optimized.py OCFLUXU
-python train_multi_encoder_optimized.py OCFLUXV
-python train_multi_encoder_optimized.py OCSMASS
-python train_multi_encoder_optimized.py SO2CMASS
-python train_multi_encoder_optimized.py SO2SMASS
-python train_multi_encoder_optimized.py SO4CMASS
-python train_multi_encoder_optimized.py SO4SMASS
-python train_multi_encoder_optimized.py SSCMASS
-python train_multi_encoder_optimized.py SSCMASS25
-python train_multi_encoder_optimized.py SSFLUXU
-python train_multi_encoder_optimized.py SSFLUXV
-python train_multi_encoder_optimized.py SSSMASS
-python train_multi_encoder_optimized.py SSSMASS25
-python train_multi_encoder_optimized.py SUFLUXU
-python train_multi_encoder_optimized.py SUFLUXV
+python train_aqi_classifier_all_species.py $SLURM_ARRAY_TASK_ID
+

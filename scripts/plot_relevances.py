@@ -57,9 +57,9 @@ for picks in pickle_list:
         sum_all_r = np.sum(np.concatenate(
             [relevances[k][j, :, :] for k in input_keys]))
         for key in input_keys:
-            r = np.squeeze(relevances[key][j, :, :]) / sum_all_r
+            r = np.squeeze(relevances[key][j, :, :])
             c = ax[int(i/4), i % 4].contourf(lon, lat, r,
-                cmap='coolwarm', levels=np.linspace(-0.005, 0.005, 100))
+                cmap='coolwarm', levels=np.linspace(-1, 1, 100))
         
         
             ax[int(i/4), i % 4].coastlines()

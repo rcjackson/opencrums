@@ -1,4 +1,5 @@
 import glob
+import sys
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import matplotlib.pyplot as plt
@@ -11,7 +12,9 @@ import numpy as np
 from datetime import timedelta
 pickles = '/lcrc/group/earthscience/rjackson/opencrums/scripts/relevance_pickles/'
 out_plot_path = '/lcrc/group/earthscience/rjackson/merra_relevances/'
-pickle_list = glob.glob(pickles + 'rel-0hr*.pickle')
+hour = int(sys.argv[1])
+pickle_list = glob.glob(pickles + 'rel-%dhr*.pickle' % hour)
+
 
 
 code = 'HOU'
@@ -60,6 +63,10 @@ pre_trough = [0, 1, 2, 3]
 post_trough = [7, 11, 14, 15]
 anticyclonic = [4, 8, 12, 13]
 transitional = [5, 6, 9, 10]
+if len(sys.argv) > 2:
+    regime = sys.argv[2]
+else:
+    regime = ""
 
 num_points = np.zeros(5)
 mean_relevances = {}
@@ -72,40 +79,51 @@ for key in relevances.keys():
         mean_relevances[key] = np.zeros((5, lon.shape[0], lon.shape[1]))
 
 for picks in pickle_list:
+    print(picks)
     p = open(picks, mode='rb')
     relevances = pickle.load(p)
-    true_times = np.array([x in pre_trough for x in soms])
-
+    classes = relevances['output'].numpy().argmax(axis=1)
+    aqi = relevances['aqi'].argmax(axis=1)
     for k in input_keys:
         relevances[k] = relevances[k].numpy()
 
+    
+    for j in range(len(classes)):
+        for k in input_keys:
+            r_min = relevances[k][j, :, :].min()
+            r_max = relevances[k][j, :, :].max()
+            relevances[k][j, :, :] = (relevances[k][j, :, :] - r_min) / (r_max - r_min)
+    true_times = np.array([x in pre_trough for x in soms])
+
     soms = np.array([get_som(x) for x in relevances['time']])
-    classes = relevances['output'].numpy().argmax(axis=1)
+            
     for j in range(len(classes)):
-        r_max = -np.inf
-        r_min = np.inf
-        for k in input_keys:
-            r_max = np.max([r_max, relevances[k][j, :, :].max()])
-            r_min = np.min([r_min, relevances[k][j, :, :].min()])
-
-        for k in input_keys:
-            relevances[k][j, :, :] = (relevances[k][j, :, :] - r_min) / (
-                    r_max - r_min)
-
-    for j in range(len(classes)):
-        num_points[classes[j]] = num_points[classes[j]] + 1
         sum_all_r = np.squeeze(np.max(np.concatenate(
             [relevances[k][j, :, :] for k in input_keys])))
-        
-        for k in input_keys:
-            mean_relevances[k][classes[j], :, :] += np.squeeze(
+
+        if regime == "":
+            num_points[classes[j]] = num_points[classes[j]] + 1 
+            for k in input_keys:
+                mean_relevances[k][classes[j], :, :] += np.squeeze(
                     relevances[k][j, :, :]) 
+        else:
+            if soms[j] in globals()[regime]:
+                num_points[classes[j]] = num_points[classes[j]] + 1 
+                for k in input_keys:
+                    mean_relevances[k][classes[j], :, :] += np.squeeze(
+                        relevances[k][j, :, :]) 
 print(num_points)
 r_max = -np.inf
+r_mean = 0
+i = 0
 for j in range(5):
     for k in input_keys:
         mean_relevances[k][j,:,:] /= num_points[j]
         r_max = np.max([r_max, np.percentile(mean_relevances[k][j, :, :], 95)])
+        r_mean += np.mean(mean_relevances[k][j, :, :])
+        i += 1
+
+r_mean = r_mean / i
 
 states_provinces = cfeature.NaturalEarthFeature(
         category='cultural',
@@ -113,40 +131,25 @@ states_provinces = cfeature.NaturalEarthFeature(
         scale='50m',
         facecolor='none')
 
-rel = {}
-rel_std = {}
 for key in input_keys:
     fig, ax = plt.subplots(5, 1,
             subplot_kw=dict(projection=ccrs.PlateCarree()),
-            figsize=(25, 15))
-    rel[key] = np.zeros(5)
-    rel_std[key] = np.zeros(5)
+            figsize=(10, 15))
     for l in range(1, 6):     
         r = np.squeeze(mean_relevances[key][l - 1])
+        
         print(r.max())
-        rel[key][l - 1] = r.mean() 
-        rel_std[key][l - 1] = r.std()
-fig, ax = plt.subplots(1, 5, figsize=(25, 20))
-rowLabels = [x[6:] for x in rel.keys()]
-colLabels = ['Good', 'Moderate', 'Unhealthy Sens.', 'Unhealthy', 'Hazardous']
-cell_text = []
-i = 0
-j = 0
-
-for j in range(5):
-    rel_array = np.array([rel[k][j] for k in rel.keys()])
-    inds = np.argsort(rel_array).astype(int)
-    rowLabelsSort = [rowLabels[x] for x in inds]
-    ax[j].barh(np.arange(len(rowLabels)), rel_array[inds])
-    ax[j].set_yticks([x for x in np.arange(len(rowLabels))])
-    ax[j].set_yticklabels(rowLabelsSort)
-    ax[j].set_xlim([0, 0.6])
-    ax[j].set_ylabel('Relevance')
-#for k in rel.keys():
-#    cell_text.append(['%1.1f' % rel[k][l] for l in range(5)])
-#ax.table(cellText=cell_text, rowLabels=rowLabels, colLabels=colLabels,
-#        loc='center')
-
-fig.savefig('relevance.png')
-plt.close(fig)
+        c = ax[l - 1].contourf(lon, lat, r,
+            cmap='seismic', levels=np.arange(0, 1., 0.01))
+        bar = plt.colorbar(c, label='Normalized relevance',
+                ax=ax[l - 1])
+       
+        ax[l - 1].coastlines()
+        ax[l - 1].add_feature(states_provinces)
+        ax[l - 1].add_feature(cfeature.BORDERS)
+        ax[l - 1].set_title(classification[l-1])
+        ax[l - 1].set_xlabel('Latitude')
+        ax[l - 1].set_ylabel('Longitude')
+    fig.savefig('output_relevance_pngs/relevance_%s%dhr-%s.png' % (regime, hour, key))
+    plt.close(fig)
 

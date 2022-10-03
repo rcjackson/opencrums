@@ -9,7 +9,6 @@ import pickle
 from datetime import timedelta, datetime
 from tensorflow.keras.layers import BatchNormalization
 from tensorflow.keras.layers import Input, Conv2D, MaxPooling2D, UpSampling2D, Flatten, Reshape, Add, ReLU, Conv2DTranspose, Dense, Dropout, BatchNormalization
-from tensorflow.distribute import MirroredStrategy
 from tensorflow.keras.callbacks import ModelCheckpoint
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras import Model
@@ -23,6 +22,8 @@ air_now_df['datetime'] = pd.to_datetime(air_now_df['DateObserved'] + ' 00:00:00'
 air_now_df = air_now_df.set_index('datetime')
 air_now_df = air_now_df.sort_index()
 print(air_now_df['CategoryNumber'].values.min())
+
+lag = 1
 
 def get_air_now_label(time):
     if np.min(np.abs((air_now_df.index - time))) > timedelta(days=1):
@@ -70,6 +71,11 @@ def load_data(species):
     where_valid = np.isfinite(classification)
     inputs = inputs[where_valid, :, :, :]
     classification = classification[where_valid]
+    # Use classification from x days ahead
+    if lag > 0:
+        classification = classification[lag*8:]
+        inputs = inputs[:lag*8, :, : :]
+
     y = tf.one_hot(classification, 5).numpy()
     x_train, x_test, y_train, y_test = train_test_split(
             inputs, y, test_size=0.20)
@@ -121,7 +127,7 @@ def run(config: dict):
             x_ds_train, y_train, 
             validation_data=(x_ds_test, y_test), epochs=config["num_epochs"],
             batch_size=config["batch_size"])
-    model.save('../models/classifier')
+    model.save('../models/classifier-1day')
     return history.history
 
 default_config = {

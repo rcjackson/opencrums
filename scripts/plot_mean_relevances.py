@@ -130,7 +130,7 @@ for picks in pickle_list:
     for j in range(len(classes)):
         sum_all_r = np.squeeze(np.max(np.concatenate(
             [relevances[k][j, :, :] for k in input_keys])))
-    
+        
         if regime == "":
             if hours[j] >= start_hour and hours[j] <= end_hour:
                 num_points[classes[j]] = num_points[classes[j]] + 1 
@@ -138,7 +138,6 @@ for picks in pickle_list:
                     mean_relevances[k][classes[j], :, :] += np.squeeze(
                         relevances[k][j, :, :]) 
                     means[k][classes[j], :, :] += np.squeeze(x[k][j, :, :])
-                    stds[k][classes[j], : :] += (means[k][classes[j], :, :] - x[k].mean(axis=0))**2
         else:
             if soms[j] in globals()[regime]:
                 num_points[classes[j]] = num_points[classes[j]] + 1 
@@ -155,7 +154,6 @@ for j in range(5):
     for k in input_keys:
         mean_relevances[k][j,:,:] /= num_points[j]
         means[k][j, :, :] /= num_points[j]
-        stds[k][j, :, :] = np.sqrt(stds[k][j, :, :] / num_points[j])
         r_max = np.max([r_max, np.percentile(mean_relevances[k][j, :, :], 95)])
         r_mean += np.mean(mean_relevances[k][j, :, :])
         i += 1
@@ -174,21 +172,31 @@ for key in input_keys:
             figsize=(10, 15))
     for l in range(1, 6):     
         r = np.squeeze(mean_relevances[key][l - 1])
-        m = means[key][l - 1, :, :] - x[key].mean(axis=0)
+        m = means[key][l - 1, :, :] 
         
         if not "FLUXU" in key:
-            print(m)
-            mmax = np.percentile(m, 99)
-            mmin = np.percentile(stds[key].min(), 1)
-            mmax = np.abs(np.max([mmax, mmin]))
-            mmin = -mmax
+            print(m, key)
+            if "DUMASS" in key:
+                mmax = 2e-5
+            elif "BCMASS" in key:
+                mmax = 1e-6
+            else:
+                mmax = np.nanpercentile(x[key], 95)
+            mmin = np.percentile(x[key], 5)
+           
+            #mmax = np.abs(np.max([mmax, mmin]))
+            mmin = np.max([0, mmin])
+            if "OCMASS" in key:
+                mmin = 1e-6
+                mmax = 3e-6
+            #mmin = -mmax
             #mmax = -1
             mmin = 0
             c = ax[l - 1].pcolormesh(lon, lat, m,
-                    vmin=mmin, vmax=mmax, cmap='coolwarm', label='%s' % key[7:])
+                    vmin=mmin, vmax=mmax, cmap='Greys', label='%s' % key[7:])
             d = ax[l - 1].contourf(lon, lat, r, cmap='coolwarm', alpha=0.5,
                     levels=[-1, -0.25, 0.25, 1])
-            bar = plt.colorbar(c, label='Perturbation %s [$kg m^{-2}$]' % key[6:],
+            bar = plt.colorbar(c, label='%s [$kg m^{-2}$]' % key[6:],
                     ax=ax[l - 1])
         else:
             mv = means[key[:-1] + "V"][l - 1, :, :]
@@ -206,10 +214,12 @@ for key in input_keys:
         ax[l - 1].coastlines()
         ax[l - 1].add_feature(states_provinces)
         ax[l - 1].add_feature(cfeature.BORDERS)
-        ax[l - 1].set_title(classification[l - 1])
+        ax[l - 1].set_title(classification[l - 1] + ' %dhr' % (start_hour))
         ax[l - 1].set_xlabel('Latitude')
         ax[l - 1].set_ylabel('Longitude')
-    fig.savefig('output_relevance_pngs/relevance_std%s%dhr-%s.png' % (regime, start_hour, key), dpi=150,
+    fig.savefig('output_relevance_pngs/relevance_mean%s%dhr-%s.png' % (regime, start_hour, key), dpi=150,
             bbox_inches='tight')
     plt.close(fig)
+
+    
 

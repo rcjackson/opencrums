@@ -11,8 +11,12 @@ nc_path = '/lcrc/group/earthscience/rjackson/MERRA2_met/*.nc4'
 ds = xr.open_mfdataset(nc_path)
 
 variable = sys.argv[1]
+num_layers = 4
 if len(sys.argv) > 2:
-    epoch_no = int(sys.argv[2])
+    if sys.argv[2] == '-l':
+        num_layers = int(sys.argv[3])
+    else:
+        epoch_no = int(sys.argv[2])
 else:
     epoch_no = 1
 
@@ -100,17 +104,17 @@ def encoder_model(input_var, no_layers=3, target_shape=(32, 48, 48)):
     output = tf.keras.layers.Cropping3D(padding, name="output")(output_conv)
     return tf.keras.Model(input_layer, output)
 
-model = encoder_model(input_var, no_layers=4)
+model = encoder_model(input_var, no_layers=num_layers)
 model.summary()
 model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=1e-4), loss="mean_squared_error")
 train_var, test_var = train_test_split(input_var, random_state=666, test_size=0.2)
 early_stop = tf.keras.callbacks.EarlyStopping(patience=100)
 checkpoint = tf.keras.callbacks.ModelCheckpoint(filepath='../models/3dencoder_%s/3dencoder-{epoch:05d}-{val_loss:.4f}.hdf5' % variable,
         mode='max')
-csv_logger = tf.keras.callbacks.CSVLogger('3d_encoder_%s.log' % variable)
+csv_logger = tf.keras.callbacks.CSVLogger('3d_encoder_%s_%dlayers.log' % (variable, num_layers))
 model.fit(train_var, train_var, validation_data=(test_var, test_var), epochs=10000,
         callbacks=[early_stop, csv_logger, checkpoint])
-model.save('../models/3dencoder-merra%s' % variable)
+model.save('../models/3dencoder-merra%s-%dlayers' % (variable, num_layers))
 
 
 

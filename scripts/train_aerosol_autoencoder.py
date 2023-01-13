@@ -9,8 +9,8 @@ import pickle
 
 from datetime import timedelta, datetime
 from tensorflow.keras.layers import BatchNormalization
-from tensorflow.keras.layers import Input, Conv2D, MaxPooling2D, UpSampling2D, Flatten, Reshape, Add, ReLU, Conv2DTranspose, Dense, Dropout, BatchNormalization
-from tensorflow.keras.callbacks import ModelCheckpoint
+from tensorflow.keras.layers import Input, Conv2D, MaxPooling2D, UpSampling2D, Flatten, Reshape, Add, ReLU, Conv2DTranspose, Dense, Dropout, BatchNormalization, Lambda, Concatenate
+from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras import Model
 from tensorflow.keras.regularizers import l2
@@ -104,27 +104,36 @@ def classifier_model(shape, the_dict, dataset):
     mpool_1s = []
     in_layers = []
     dict_keys = list(dataset.keys())
-    for j in range(len(dict_keys)):
-        inp_layer = Input(shape=(height, width, 1), name=dict_keys[j])
-        mpool_1 = inp_layer
-        in_layers.append(inp_layer)
-        for i in range(the_dict['num_layers']):
-            conv2d_1 = Conv2D(the_dict['num_channels'],
-                (2, 2), activation=the_dict['activation'], padding='same',
-                kernel_initializer='he_normal')(mpool_1)
-            conv2d_1 = BatchNormalization()(conv2d_1)
-            mpool_1 = MaxPooling2D((2, 2))(conv2d_1)
-        mpool_1s.append(Flatten()(mpool_1))
-    flat_1 = Add()(mpool_1s)
+    num_variables = len([x for x in dataset.keys()])
+    input1 = Input(shape=(height, width, 1))
     
-    for i in range(the_dict['num_dense_layers']):
-        flat_1 = Dense(the_dict['num_dense_nodes'], activation='relu'
-                )(flat_1)
-        flat_1 = BatchNormalization()(flat_1)
+    mpool_1 = input1
+    for i in range(the_dict['num_layers']):
+        conv2d_1 = Conv2D(the_dict['num_channels'],
+            (2, 2), activation=the_dict['activation'], padding='same',
+            kernel_initializer='he_normal')(mpool_1)
+        conv2d_1 = BatchNormalization()(conv2d_1)
+        if i == the_dict['num_layers'] - 1:
+            name = "encoding"
+        else:
+            name = "layer_%d" % i
+        mpool_1 = MaxPooling2D((2, 2), name=name)(conv2d_1)
+    orig_shape = mpool_1.shape
+    flat_1 = Flatten()(mpool_1)
 
-    output = Dense(5, activation="softmax", name="class")(flat_1)
+
     
-    return Model(in_layers, output)
+    for i in range(the_dict['num_layers']):
+        conv2d_1 = Conv2DTranspose(the_dict['num_channels'],
+            (2, 2), activation=the_dict['activation'], padding='same',
+            kernel_initializer='he_normal')(mpool_1)
+        conv2d_1 = BatchNormalization()(conv2d_1)
+        mpool_1 = UpSampling2D((2, 2))(conv2d_1)
+    output = Conv2D(1, (2, 2), 
+            padding='same', 
+            activation="sigmoid", kernel_initializer='he_normal')(mpool_1)
+
+    return Model(input1, output)
 
 
 def run(config: dict):
@@ -139,29 +148,42 @@ def run(config: dict):
         x_ds_train.update(x_ds_train1)
         x_ds_test.update(x_ds_test1)
     
-    model = classifier_model(shape, config, x_ds_test)
-    model.compile(optimizer=Adam(lr=config["learning_rate"]),
-        loss="categorical_crossentropy", metrics=['acc'])
-    model.summary()
+    #x_train = np.stack([x for x in x_ds_train.values()], axis=3)
+    #x_test = np.stack([x for x in x_ds_test.values()], axis=3)
+    var_keys = [x for x in x_ds_train.keys()]
+    variable = var_keys[int(sys.argv[2])]
+    x_train = x_ds_train[variable][:, :, :, np.newaxis]
+    x_test = x_ds_test[variable][:, :, :, np.newaxis]
+    with tf.device("/GPU:0"):
+        x_train = tf.image.resize(x_train, (16, 32)).numpy()
+        x_test = tf.image.resize(x_test, (16, 32)).numpy()
+        print(x_train.shape, x_test.shape)
+        print(y_train.shape, y_test.shape)
+        shape = (None, 16, 32, 17)
+        model = classifier_model(shape, config, x_ds_test)
+        model.compile(optimizer=Adam(lr=config["learning_rate"]),
+                loss="mean_squared_error")
+        model.summary()
 
     # AQI classes inbalanced, need weights
-    class_weight = {0: 1, 1: 2, 2: 20, 3: 90, 4: 510}
-    history = model.fit(
-            x_ds_train, y_train, 
-            validation_data=(x_ds_test, y_test), epochs=config["num_epochs"],
-            batch_size=config["batch_size"], class_weight=class_weight)
-    model.save('../models/classifier-%s-lag-%d' % (site, lag))
+        class_weight = {0: 1, 1: 2, 2: 20, 3: 90, 4: 510}
+        history = model.fit(
+                x_train, x_train, validation_data=(x_test, x_test),
+             epochs=config["num_epochs"], callbacks=[EarlyStopping(patience=100,
+                 monitor="val_loss")],
+                batch_size=config["batch_size"])
+        model.save('../models/autoencoder-%s-lag-%d' % (variable, lag))
     return history.history
 
 default_config = {
-        "num_epochs": 250,
-        "num_channels": 32,
-        "learning_rate": 0.0001,
+        "num_epochs": 10000,
+        "num_channels": 64,
+        "learning_rate": 0.001,
         "num_dense_nodes": 64,
         "num_dense_layers": 3,
         "activation": "relu",
         "batch_size": 16,
-        "num_layers": 4}
+        "num_layers": 3}
 
 
 #if not ray.is_initialized():

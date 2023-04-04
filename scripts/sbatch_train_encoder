@@ -9,5 +9,5 @@
 export MPLBACKEND="agg"
 conda activate pydda_env
 cd /lcrc/group/earthscience/rjackson/opencrums/scripts
-python train_aerosol_autoencoder.py 0 $SLURM_ARRAY_TASK_ID
+python train_aerosol_autoencoder.py $SLURM_ARRAY_TASK_ID
 

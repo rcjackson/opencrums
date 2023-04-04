@@ -12,7 +12,7 @@ from glob import glob
 
 if __name__ == "__main__":
     in_merra_path = '/lcrc/group/earthscience/rjackson/MERRA2/%s/*.nc4' % sys.argv[1]
-    out_path = '/lcrc/group/earthscience/rjackson/MERRA2/se_reduced/'
+    out_path = '/lcrc/group/earthscience/rjackson/MERRA2/hou_extended/'
     
     variable_list = ["BCCMASS", "BCFLUXU", "BCFLUXV",
         "BCSMASS", "DMSCMASS", "DMSSMASS", 
@@ -28,7 +28,7 @@ if __name__ == "__main__":
 
     code = 'HOU'
     if code == 'HOU':
-        ax_extent = [-105, -85, 25, 35]
+        ax_extent = [-120, -70, 5, 55]
     elif code == 'SEUS':
         ax_extent = [-90, -75, 30, 37.5]
 

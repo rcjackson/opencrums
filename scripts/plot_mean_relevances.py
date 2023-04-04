@@ -10,7 +10,7 @@ import pandas as pd
 import numpy as np
 
 from datetime import timedelta
-pickles = '/lcrc/group/earthscience/rjackson/opencrums/scripts/relevance_pickles/'
+pickles = '/lcrc/group/earthscience/rjackson/opencrums/scripts/relevance_pickles_large/'
 out_plot_path = '/lcrc/group/earthscience/rjackson/merra_relevances/'
 if len(sys.argv) > 0:
     start_hour = int(sys.argv[1])
@@ -25,7 +25,7 @@ pickle_list = glob.glob(pickles + 'rel-%dhr*.pickle' % hour)
 
 code = 'HOU'
 if code == 'HOU':
-    ax_extent = [-105, -85, 25, 35]
+    ax_extent = [-120, -70, 5, 55]
 elif code == 'SEUS':
     ax_extent = [-90, -75, 30, 37.5]
 
@@ -42,7 +42,7 @@ def get_som(timestamp):
 
 # Get lats, lons for plotting
 ds = xr.open_mfdataset(
-            '/lcrc/group/earthscience/rjackson/MERRA2/hou_reduced/DUCMASS*.nc')
+            '/lcrc/group/earthscience/rjackson/MERRA2/hou_extended/DUCMASS*.nc')
 print(ds.time)
 x = ds["DUCMASS"].values
 lon = ds["lon"].values
@@ -99,7 +99,7 @@ for k in input_keys:
     if variable[-4:] == "MASS":
         variable = variable[:-4] + "C" + variable[-4:]
     ds = xr.open_mfdataset(
-            '/lcrc/group/earthscience/rjackson/MERRA2/hou_reduced/%s*.nc' % variable)
+            '/lcrc/group/earthscience/rjackson/MERRA2/hou_extended/%s*.nc' % variable)
     x[k] = ds[variable].values
     mins[k] = x[k].min()
     maxs[k] = x[k].max()
@@ -107,7 +107,6 @@ for k in input_keys:
 
 for picks in pickle_list:
     p = open(picks, mode='rb')
-    print(picks)
     relevances = pickle.load(p)
     classes = relevances['output'].numpy().argmax(axis=1)
     aqi = relevances['aqi'].argmax(axis=1)
@@ -118,7 +117,7 @@ for picks in pickle_list:
         for k in input_keys:
             r_min = relevances[k][j, :, :].min()
             r_max = relevances[k][j, :, :].max()
-            maxv = np.max(np.abs([r_min, r_max]))
+            maxv = np.max(np.abs(relevances[k])[j, :, :])
             relevances[k][j, :, :] = relevances[k][j, :, :] / maxv
     true_times = np.array([x in pre_trough for x in soms])
 
@@ -140,13 +139,15 @@ for picks in pickle_list:
                     means[k][classes[j], :, :] += np.squeeze(x[k][j, :, :])
         else:
             if soms[j] in globals()[regime]:
-                num_points[classes[j]] = num_points[classes[j]] + 1 
-                for k in input_keys:
-                    mean_relevances[k][classes[j], :, :] += np.squeeze(
-                        relevances[k][j, :, :]) 
+                if hours[j] >= start_hour and hours[j] <= end_hour: 
+                    num_points[classes[j]] = num_points[classes[j]] + 1 
+                    for k in input_keys:
+                        mean_relevances[k][classes[j], :, :] += np.squeeze(
+                            relevances[k][j, :, :]) 
+                        means[k][classes[j], :, :] += np.squeeze(x[k][j, :, :])
 
-
-print(num_points/24)
+print(mean_relevances['input_DUMASS'][1, :, :])
+print(num_points)
 r_max = -np.inf
 r_mean = 0
 i = 0
@@ -167,10 +168,10 @@ states_provinces = cfeature.NaturalEarthFeature(
         facecolor='none')
 
 for key in input_keys:
-    fig, ax = plt.subplots(5, 1,
+    fig, ax = plt.subplots(3, 1,
             subplot_kw=dict(projection=ccrs.PlateCarree()),
             figsize=(10, 15))
-    for l in range(1, 6):     
+    for l in range(1, 4):     
         r = np.squeeze(mean_relevances[key][l - 1])
         m = means[key][l - 1, :, :] 
         
@@ -195,21 +196,21 @@ for key in input_keys:
             c = ax[l - 1].pcolormesh(lon, lat, m,
                     vmin=mmin, vmax=mmax, cmap='Greys', label='%s' % key[7:])
             d = ax[l - 1].contourf(lon, lat, r, cmap='coolwarm', alpha=0.5,
-                    levels=[-1, -0.25, 0.25, 1])
-            bar = plt.colorbar(c, label='%s [$kg m^{-2}$]' % key[6:],
+                    levels=[-1, -0.1, 0.1, 1])
+            bar = plt.colorbar(c, label='%s [$kg\ m^{-2}$]' % key[6:],
                     ax=ax[l - 1])
         else:
             mv = means[key[:-1] + "V"][l - 1, :, :]
             print(np.mean(m), np.mean(mv))
             mag = np.sqrt(m**2 + mv**2)
             c = ax[l - 1].pcolormesh(lon, lat, mag,
-                    vmin=mmin, vmax=mag.max(), cmap='Blues', label='%s [$kg m^{-2}$]' % key[7:])
-            bar = plt.colorbar(c, label='%s [$kg m s^{-1}$]' % key[6:-1],
+                    vmin=mmin, vmax=mag.max(), cmap='Blues', label='%s [$kg\ m^{-2}$]' % key[7:])
+            bar = plt.colorbar(c, label='%s [$kg\ m s^{-1}$]' % key[6:-1],
                     ax=ax[l - 1])
             ax[l - 1].streamplot(lon, lat, m*1e6, mv*1e6)
-            d = ax[l - 1].contourf(lon, lat, r, alpha=0.2,
+            d = ax[l - 1].contourf(lon, lat, r, alpha=0.5,
                     cmap='coolwarm',
-                    levels=[-1, -0.25, 0.25, 1])
+                    levels=[-1, -0.1, 0.1,  1])
         #ax[l - 1].set_extent(ax_extent)
         ax[l - 1].coastlines()
         ax[l - 1].add_feature(states_provinces)

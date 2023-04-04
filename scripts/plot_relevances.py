@@ -5,19 +5,19 @@ import pickle
 import xarray as xr
 import numpy as np
 
-pickles = '/lcrc/group/earthscience/rjackson/opencrums/notebooks/'
+pickles = '/lcrc/group/earthscience/rjackson/opencrums/scripts/relevance_pickles_large/'
 out_plot_path = '/lcrc/group/earthscience/rjackson/merra_relevances/'
-pickle_list = glob.glob(pickles + 'relevance*.pickle')
-
+pickle_list = glob.glob(pickles + '*.pickle')
+print(pickle_list)
 code = 'HOU'
 if code == 'HOU':
-    ax_extent = [-105, -85, 25, 35]
+    ax_extent = [-120, -70, 5, 55]
 elif code == 'SEUS':
     ax_extent = [-90, -75, 30, 37.5]
 
 # Get lats, lons for plotting
 ds = xr.open_mfdataset(
-            '/lcrc/group/earthscience/rjackson/MERRA2/hou_reduced/DUCMASS*.nc')
+            '/lcrc/group/earthscience/rjackson/MERRA2/hou_extended/DUCMASS*.nc')
 print(ds.time)
 x = ds["DUCMASS"].values
 lon = ds["lon"].values
@@ -42,14 +42,14 @@ lon, lat = np.meshgrid(lon, lat)
 for picks in pickle_list:
     p = open(picks, mode='rb')
     relevances = pickle.load(p)
-    classes = relevances['outputs'].argmax(axis=1)
+    classes = relevances['aqi'].argmax(axis=1)
     print(lon.shape)
     input_keys = []
     for key in relevances.keys():
         if "input_" in key:
             input_keys.append(key)
 
-    for j in range(100):
+    for j in range(10):
         i = 0
         fig, ax = plt.subplots(4, 4,
             subplot_kw=dict(projection=ccrs.PlateCarree()),
@@ -58,6 +58,7 @@ for picks in pickle_list:
             [relevances[k][j, :, :] for k in input_keys]))
         for key in input_keys:
             r = np.squeeze(relevances[key][j, :, :])
+            r = r / np.max(np.abs(r))
             c = ax[int(i/4), i % 4].contourf(lon, lat, r,
                 cmap='coolwarm', levels=np.linspace(-1, 1, 100))
         

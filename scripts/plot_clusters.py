@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 
 titles = ['Good', 'Moderate', 'Unhealthy for Sensitive Groups', 'Unhealthy', 'Hazardous']
 if __name__ == '__main__':
-    nc_path = '/lcrc/group/earthscience/rjackson/MERRA2/hou_reduced/'
+    nc_path = '/lcrc/group/earthscience/rjackson/MERRA2/hou_extended/'
     air_now_data = glob.glob(
             '/lcrc/group/earthscience/rjackson/epa_air_now/*.csv')
     air_now_df = pd.concat(map(pd.read_csv, air_now_data))
@@ -71,7 +71,7 @@ if __name__ == '__main__':
     vmax = ds.max().values
     if variable == "DUCMASS":
         factor = 1e3
-        contours = np.linspace(0, 0.2, 30)
+        contours = np.linspace(0, 0.2e-3, 30)
         title_label = "DUCMASS [g/m^3]"
         cmap = 'Reds'
         # Load fluxes for streamline plot
@@ -89,7 +89,7 @@ if __name__ == '__main__':
         streamlines = True
     elif variable == "OCCMASS":
         factor = 1e3
-        contours = np.linspace(0, 0.05, 30)
+        contours = np.linspace(0, 0.05e-3, 30)
         title_label = "OCCMASS [g/m^3]"
         cmap = 'Reds'
         # Load fluxes for streamline plot
@@ -107,7 +107,7 @@ if __name__ == '__main__':
         streamlines = True 
     elif variable == "BCCMASS":
         factor = 1e3
-        contours = np.linspace(0, 0.003, 30)
+        contours = np.linspace(0, 0.003, 30)*1e-3
         title_label = "BCCMASS [g/m^3]"
         cmap = 'Reds'
         # Load fluxes for streamline plot
@@ -131,10 +131,15 @@ if __name__ == '__main__':
         streamlines = False
     else:
         factor = 1
+        streamlines = False
+        cmap = 'coolwarm'
+        contours = np.logspace(-7, -5, 20)
+        title_label = "%s" % variable
+        
     for i in range(int(num_clusters)):
         inds = np.argwhere(classification == i+1)
         x, y = np.meshgrid(lon, lat)
-        mean = np.squeeze(np.mean(ds.values[inds, :, :], axis=0)) * factor
+        mean = np.squeeze(np.mean(ds.values[inds, :, :], axis=0))
         
         c = ax[i].contourf(x, y, mean, cmap=cmap,
                 levels=contours)

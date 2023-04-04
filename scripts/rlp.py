@@ -15,6 +15,7 @@ import sys
 class LayerwiseRelevancePropogation():
     def __init__(self, model):
         self.model = model
+        # Epsilon for epsilon RLP rule
         self.epsilon = 1e-5
         # Count the number of input layers --> Number of CNN networks
         self.no_inputs = 0
@@ -58,7 +59,8 @@ class LayerwiseRelevancePropogation():
             R = tf.nn.batch_normalization(s, mmean, mvar, beta, gamma, self.epsilon)
         c = g.gradient(R, s)
         return c * x
-     
+
+    # Conv2D backpropogation 
     def relprop_conv(self, x, r, w, strides=(1, 1, 1, 1), padding='SAME'):
         if len(strides) == 2:
             strides = (1, strides[0], strides[1], 1)
@@ -74,6 +76,7 @@ class LayerwiseRelevancePropogation():
 
         return (self.alpha * c_p + self.beta * c_n) * x
 
+    # Maxpooling layer RLP
     def relprop_pool(self, x, r, ksize=(1, 2, 2, 1), strides=(1, 2, 2, 1), padding='SAME'):
         if len(strides) == 2:
             strides = (1, strides[0], strides[1], 1)
@@ -167,11 +170,9 @@ class LayerwiseRelevancePropogation():
             
         return output_relevances
 
-hour = int(sys.argv[1])
-if hour == 0:
-    my_model = tf.keras.models.load_model('/lcrc/group/earthscience/rjackson/opencrums/models/classifier-hou-lag-%d' % hour)
-else:
-    my_model = tf.keras.models.load_model('/lcrc/group/earthscience/rjackson/opencrums/models/classifier-se-lag-%d' % hour)
+hour = 0
+my_model = tf.keras.models.load_model(
+        '/lcrc/group/earthscience/rjackson/opencrums/models/classifier-large-hou-lag-new-aqi-%d' % hour)
 
 air_now_data = glob('/lcrc/group/earthscience/rjackson/epa_air_now/*.csv')
 air_now_df = pd.concat(map(pd.read_csv, air_now_data))
@@ -187,10 +188,20 @@ def get_air_now_label(time):
     if np.min(np.abs((air_now_df.index - time))) > timedelta(days=1):
         return np.nan
     ind = np.argmin(np.abs(air_now_df.index - time))
-    return air_now_df['CategoryNumber'].values[ind]
+    if air_now_df['AQI'].values[ind] < 34.0:
+        return 1
+    elif air_now_df['AQI'].values[ind] >= 34.0 and air_now_df['AQI'].values[ind] < 42.0:
+        return 2
+    elif air_now_df['AQI'].values[ind] >= 42.0 and air_now_df['AQI'].values[ind] < 51.0:
+        return 3
+    elif air_now_df['AQI'].values[ind] >= 51.0 and air_now_df['AQI'].values[ind] < 57.0:
+        return 4
+    elif air_now_df['AQI'].values[ind] >= 57.0:
+        return 5
 
+# Load MERRA2 data from files
 def load_data(species):
-    ds = xr.open_mfdataset('/lcrc/group/earthscience/rjackson/MERRA2/hou_reduced/%sCMASS*.nc' % species).sortby('time')
+    ds = xr.open_mfdataset('/lcrc/group/earthscience/rjackson/MERRA2/hou_extended/%sCMASS*.nc' % species).sortby('time')
     print(ds)
     times = np.array(list(map(pd.to_datetime, ds.time.values)))
     x = ds["%sCMASS" % species].values
@@ -207,7 +218,7 @@ def load_data(species):
        inp = "SU"
     else:
        inp = species
-    ds = xr.open_mfdataset('/lcrc/group/earthscience/rjackson/MERRA2/hou_reduced/%sFLUXU*.nc' % inp).sortby('time')
+    ds = xr.open_mfdataset('/lcrc/group/earthscience/rjackson/MERRA2/hou_extended/%sFLUXU*.nc' % inp).sortby('time')
     x2 = ds["%sFLUXU" % inp].values
     scaler = StandardScaler()
     scaler.fit(np.reshape(x2, (old_shape[0], old_shape[1] * old_shape[2])))
@@ -216,7 +227,7 @@ def load_data(species):
     x2 = np.reshape(x2, old_shape)
     inputs[:, :, :, 1] = x2
     ds.close()
-    ds = xr.open_mfdataset('/lcrc/group/earthscience/rjackson/MERRA2/hou_reduced/%sFLUXV*.nc' % inp).sortby('time')
+    ds = xr.open_mfdataset('/lcrc/group/earthscience/rjackson/MERRA2/hou_extended/%sFLUXV*.nc' % inp).sortby('time')
     x2 = ds["%sFLUXV" % inp].values
     scaler = StandardScaler()
     scaler.fit(np.reshape(x2, (old_shape[0], old_shape[1] * old_shape[2])))
@@ -262,12 +273,18 @@ def slice_input_ds(x: dict, y, t, start, end):
     return x_new, y_new, t_test
 print(x_ds_train['input_DMSMASS'].shape)
 lrp = LayerwiseRelevancePropogation(my_model)
-for i in range(0, y_predict.shape[0], 100):
-    print(i + 100)
-    x_slice, y_slice, t_slice = slice_input_ds(x_ds_train, y_predict, t_train, i, i + 100)
+for i in range(0, y_predict.shape[0], 10):
+    print(i + 10)
+    x_slice, y_slice, t_slice = slice_input_ds(x_ds_train, y_predict, t_train, i, i + 10)
     relevance = lrp.calc_relevance(x_slice, y_slice)
     relevance['time'] = t_slice
     relevance['aqi'] = y_train
-    with open('relevance_pickles/rel-%dhr%d.pickle' % (hour, i), mode='wb') as f:
+    with open('relevance_pickles_large_new/rel-%dhr%d.pickle' % (hour, i), mode='wb') as f:
+        rkeys = list(relevance.keys())
+        for k in rkeys:
+            if "conv2d" in k or "flatten" in k or "batch_normalization" in k:
+                del relevance[k]
+            if "max_pooling2d" in k:
+                del relevance[k]
         pickle.dump(relevance, f)
 

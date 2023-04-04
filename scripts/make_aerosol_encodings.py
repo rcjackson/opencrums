@@ -33,8 +33,7 @@ def preprocess_dataset(ds, species):
     x = ds[species].values
     min_gt0 = np.min(x[x > 0])
     x[x == 0] = min_gt0
-    if not "FLUX" in species:
-        x = np.log10(x)
+    x = np.log10(x)
     x = x - x.min()
     old_shape = x.shape
     #scaler = MinMaxScaler()
@@ -55,11 +54,7 @@ def load_data(species):
     preproc = lambda x: preprocess_dataset(x, species)
     ds = xr.open_mfdataset('/lcrc/group/earthscience/rjackson/MERRA2/hou_extended/%s*.nc' % species,
                            preprocess=preproc).sortby('time')
-    x_train, x_test = train_test_split(
-            ds[species], test_size=0.20, random_state=3)
-    x_test, x_validation = train_test_split(x_test, test_size=0.50,
-            random_state=3)
-    return x_train, x_test, x_validation
+    return ds[species], ds["time"]
 
 
 class Sampling(tf.keras.layers.Layer):
@@ -94,8 +89,8 @@ def decoder_model(shape, the_dict):
     latent_inputs = Input(shape=(latent_dim,))
     width = shape[2]
     height = shape[1]
-    input1 = Dense(16 * 16 * the_dict['num_channels'])(latent_inputs)
-    conv2d_1 = Reshape((16, 16, the_dict['num_channels']))(input1)
+    input1 = Dense(4 * 8 * the_dict['num_channels'])(latent_inputs)
+    conv2d_1 = Reshape((4, 8, the_dict['num_channels']))(input1)
     for i in range(the_dict['num_layers']):
         conv2d_1 = Conv2DTranspose(the_dict['num_channels'], (3, 3), activation='relu', padding='same')(conv2d_1)
         conv2d_1 = UpSampling2D((2,2))(conv2d_1)
@@ -153,60 +148,32 @@ class VAE(tf.keras.Model):
 
 def run(config: dict):
     species = species_list[int(sys.argv[1])]
-    x_ds_train, x_ds_test, x_ds_validation = load_data(species)
-    x_ds_train_gen = x_ds_train.batch.generator(
-        input_dims={'x': 64, 'y': 64, 'channel': 1},
-        batch_dims={'time': config["batch_size"]})
-    x_ds_test_gen = x_ds_test.batch.generator(
-        input_dims={'x': 64, 'y': 64, 'channel': 1},
-        batch_dims={'time': config["batch_size"]})
-    x_ds_valid_gen = x_ds_validation.batch.generator(
+    x, time = load_data(species)
+    x_gen = x.batch.generator(
         input_dims={'x': 64, 'y': 64, 'channel': 1},
         batch_dims={'time': config["batch_size"]})
 
-    shape = x_ds_train.shape
-    encoder = encoder_model(shape, config, species)
-    decoder = decoder_model(shape, config)
-    model = VAE(encoder, decoder)
-    encoder.summary()
-    decoder.summary()
-    model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=config["learning_rate"]))
-    dataset_train = CustomTFDataset(x_ds_train_gen, x_ds_train_gen)
-    dataset_test = CustomTFDataset(x_ds_test_gen, x_ds_test_gen)
-    dataset_valid = CustomTFDataset(x_ds_valid_gen, x_ds_valid_gen)
-    checkpoint_file_path = '../models/autoencoder-checkpoint-%s' % species
-    checkpoint = tf.keras.callbacks.ModelCheckpoint(save_weights_only=True,
-            monitor='reconstruction_loss', filepath=checkpoint_file_path,
-            save_best_only=True, mode='min')
-    if len(glob.glob(checkpoint_file_path + "*")) > 0:
-        print("Loading %s" % checkpoint_file_path)
-        model.load_weights(checkpoint_file_path)
-    history = model.fit(
-            dataset_train, 
-            epochs=config["num_epochs"], callbacks=[EarlyStopping(patience=100,
-            monitor="reconstruction_loss"), checkpoint])
-    model.save('../models/autoencoder-large-%s' % species)
+    
+    model = load_model('../models/autoencoder-large-%s' % species)
     # Plot quicklooks of trained result
-    if not os.path.exists('../models/test_output/%s' % species):
-        os.makedirs('../models/test_output/%s' % species)
+    encodings = []
+    times = []
+    for i, data in enumerate(x_gen):
+        predict = model.encoder.predict(data)
+        times.append(data["time"].values)
+        encodings.append(predict[2])
+    encodings = np.concatenate(np.squeeze(encodings), axis=0)
+    times = np.concatenate(times)
+    order = np.argsort(times)
+    encodings = encodings[order]
+    times = times[order]
+    encodings = xr.DataArray(np.squeeze(encodings), dims=('time', 'latent_space'))
+    encodings.attrs["long_name"] = "Latent space encoding of %s" % species
+    out_dataset = {'time': times, 'encodings': encodings}
+    out_dataset = xr.Dataset(out_dataset)
+    out_dataset.to_netcdf('%s_encoding.nc' % species)
 
-    i = 0 
-    for test_batch, y_batch in dataset_test:
-        fig, ax = plt.subplots(config["batch_size"], 2, figsize=(5, 20))
-        prediction = model.predict(test_batch)
-        for j in range(config["batch_size"]):
-            ax[j, 0].pcolormesh(test_batch[j].numpy().squeeze(), vmin=0, vmax=1, cmap='Greys_r')
-            ax[j, 0].axis('off')
-            ax[j, 1].pcolormesh(prediction[j].squeeze(), vmin=0, vmax=1, cmap='Greys_r')
-            ax[j, 1].axis('off')
-        fig.savefig('../models/test_output/%s/%d.png' % (species, i), bbox_inches='tight')
-        plt.close(fig)
-        del fig
-        i += 1
-        if i == 100:
-            break
-
-    return history.history
+    return 
 
 default_config = {
         "num_epochs": 10000,

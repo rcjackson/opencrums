@@ -10,7 +10,7 @@ import pickle
 from datetime import timedelta, datetime
 from tensorflow.keras.layers import BatchNormalization
 from tensorflow.keras.layers import Input, Conv2D, MaxPooling2D, UpSampling2D, Flatten, Reshape, Add, ReLU, Conv2DTranspose, Dense, Dropout, BatchNormalization
-from tensorflow.keras.callbacks import ModelCheckpoint
+from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping, ModelCheckpoint
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras import Model
 from tensorflow.keras.regularizers import l2
@@ -37,12 +37,21 @@ def get_air_now_label(time):
     if np.min(np.abs((air_now_df.index - time))) > timedelta(days=1):
         return np.nan
     ind = np.argmin(np.abs(air_now_df.index - time))
-    return air_now_df['CategoryNumber'].values[ind]
+    if air_now_df['AQI'].values[ind] < 34.0:
+        return 1
+    elif air_now_df['AQI'].values[ind] >= 34.0 and air_now_df['AQI'].values[ind] < 42.0:
+        return 2
+    elif air_now_df['AQI'].values[ind] >= 42.0 and air_now_df['AQI'].values[ind] < 51.0:
+        return 3
+    elif air_now_df['AQI'].values[ind] >= 51.0 and air_now_df['AQI'].values[ind] < 57.0:
+        return 4
+    elif air_now_df['AQI'].values[ind] >= 57.0:
+        return 5
 
 site = "hou"
 
 def load_data(species):
-    ds = xr.open_mfdataset('/lcrc/group/earthscience/rjackson/MERRA2/%s_reduced/%sCMASS*.nc' % (site, species)).sortby('time')
+    ds = xr.open_mfdataset('/lcrc/group/earthscience/rjackson/MERRA2/%s_extended/%sCMASS*.nc' % (site, species)).sortby('time')
     print(ds)
     times = np.array(list(map(pd.to_datetime, ds.time.values)))
     x = ds["%sCMASS" % species].values
@@ -59,7 +68,7 @@ def load_data(species):
        inp = "SU"
     else:
        inp = species
-    ds = xr.open_mfdataset('/lcrc/group/earthscience/rjackson/MERRA2/%s_reduced/%sFLUXU*.nc' % (site, inp)).sortby('time')
+    ds = xr.open_mfdataset('/lcrc/group/earthscience/rjackson/MERRA2/%s_extended/%sFLUXU*.nc' % (site, inp)).sortby('time')
     x2 = ds["%sFLUXU" % inp].values
     scaler = StandardScaler()
     scaler.fit(np.reshape(x2, (old_shape[0], old_shape[1] * old_shape[2])))
@@ -68,7 +77,7 @@ def load_data(species):
     x2 = np.reshape(x2, old_shape)
     inputs[:, :, :, 1] = x2
     ds.close()
-    ds = xr.open_mfdataset('/lcrc/group/earthscience/rjackson/MERRA2/%s_reduced/%sFLUXV*.nc' % (site, inp)).sortby('time')
+    ds = xr.open_mfdataset('/lcrc/group/earthscience/rjackson/MERRA2/%s_extended/%sFLUXV*.nc' % (site, inp)).sortby('time')
     x2 = ds["%sFLUXV" % inp].values
     scaler = StandardScaler()
     scaler.fit(np.reshape(x2, (old_shape[0], old_shape[1] * old_shape[2])))
@@ -86,7 +95,8 @@ def load_data(species):
     print(inputs.shape, classification.shape)
     y = tf.one_hot(classification, 5).numpy()
     x_train, x_test, y_train, y_test = train_test_split(
-            inputs, y, test_size=0.20, random_state=3)
+            inputs, y, test_size=0.40, random_state=3)
+    x_test, x_validation, y_test, y_validation = train_test_split(x_test, y_test, test_size=0.50, random_state=3)
     shape = inputs.shape
     x_dataset_train = {'input_%sMASS' % species: np.squeeze(x_train[:, :, :, 0]),
             'input_%sFLUXU' % inp: np.squeeze(x_train[:, :, :, 1]),
@@ -94,8 +104,11 @@ def load_data(species):
     x_dataset_test = {'input_%sMASS' % species: np.squeeze(x_test[:, :, :, 0]),
             'input_%sFLUXU' % inp: np.squeeze(x_test[:, :, :, 1]),
             'input_%sFLUXV' % inp: np.squeeze(x_test[:, :, :, 2])}
-
-    return x_dataset_train, x_dataset_test, y_train, y_test, shape
+    x_validation = {'input_%sMASS' % species: np.squeeze(x_validation[:, :, :, 0]),
+            'input_%sFLUXU' % inp: np.squeeze(x_validation[:, :, :, 1]),
+            'input_%sFLUXV' % inp: np.squeeze(x_validation[:, :, :, 2])}
+     
+    return x_dataset_train, x_dataset_test, x_validation, y_train, y_test, y_validation, shape
 
 
 def classifier_model(shape, the_dict, dataset):
@@ -130,31 +143,39 @@ def classifier_model(shape, the_dict, dataset):
 def run(config: dict):
     x_ds_train = {}
     x_ds_test = {}
+    x_ds_valid = {}
     y_train = []
     y_test = []
+    y_valid = []
     species_list = ['SS', 'SO4', 'SO2', 'OC', 'DU', 'DMS', 'BC']
     for species in species_list:
         print(species)
-        x_ds_train1, x_ds_test1, y_train, y_test, shape = load_data(species)
+        x_ds_train1, x_ds_test1, x_ds_valid1, y_train, y_test, y_valid, shape = load_data(species)
         x_ds_train.update(x_ds_train1)
         x_ds_test.update(x_ds_test1)
-    
+        x_ds_valid.update(x_ds_valid1)
     model = classifier_model(shape, config, x_ds_test)
     model.compile(optimizer=Adam(lr=config["learning_rate"]),
         loss="categorical_crossentropy", metrics=['acc'])
     model.summary()
-
+    model.load_weights('../models/classifier-large-new-aqi')
     # AQI classes inbalanced, need weights
     class_weight = {0: 1, 1: 2, 2: 20, 3: 90, 4: 510}
     history = model.fit(
             x_ds_train, y_train, 
             validation_data=(x_ds_test, y_test), epochs=config["num_epochs"],
-            batch_size=config["batch_size"], class_weight=class_weight)
-    model.save('../models/classifier-%s-lag-%d' % (site, lag))
+            batch_size=config["batch_size"], class_weight=class_weight,
+            callbacks=[EarlyStopping(patience=100, monitor="val_acc", mode="max"),
+                ModelCheckpoint('../models/classifier-large-new-aqi', 
+                    save_freq=50, save_weights_only=True)])
+    model.save('../models/classifier-large-%s-lag-new-aqi-%d' % (site, lag))
+    with open('valid.pickle', 'w') as f:
+        pickle.dump({'x_train': x_ds_train, 'x_test': x_ds_test, 'x_valid': x_ds_valid,
+            'y_train': y_train, 'y_test': y_test, 'y_valid': y_valid}, f)
     return history.history
 
 default_config = {
-        "num_epochs": 250,
+        "num_epochs": 5000,
         "num_channels": 32,
         "learning_rate": 0.0001,
         "num_dense_nodes": 64,

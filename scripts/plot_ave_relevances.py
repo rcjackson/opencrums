@@ -16,7 +16,7 @@ pickle_list = glob.glob(pickles + 'rel-0hr*.pickle')
 
 code = 'HOU'
 if code == 'HOU':
-    ax_extent = [-105, -85, 25, 35]
+    ax_extent = [-120, -70, 5, 55]
 elif code == 'SEUS':
     ax_extent = [-90, -75, 30, 37.5]
 

@@ -3,10 +3,9 @@
 #SBATCH --time=6:00:00
 #SBATCH --job-name=download_era
 #SBATCH -n 1
-#SBATCH --gres=gpu:1
 # Environment variables
 
 export MPLBACKEND="agg"
 conda activate xgboost_env
 cd /lcrc/group/earthscience/rjackson/opencrums/scripts
-python preprocess_merra2.py 2019
+python preprocess_merra2.py 20$SLURM_ARRAY_TASK_ID

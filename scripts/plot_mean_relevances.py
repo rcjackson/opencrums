@@ -8,9 +8,13 @@ import pickle
 import xarray as xr
 import pandas as pd
 import numpy as np
+import matplotlib.ticker as mticker
 
+from matplotlib.colors import LogNorm
 from datetime import timedelta
-pickles = '/lcrc/group/earthscience/rjackson/opencrums/scripts/relevance_pickles_large/'
+from cartopy.mpl.gridliner import LONGITUDE_FORMATTER, LATITUDE_FORMATTER
+
+pickles = '/lcrc/group/earthscience/rjackson/opencrums/scripts/relevance_pickles/'
 out_plot_path = '/lcrc/group/earthscience/rjackson/merra_relevances/'
 if len(sys.argv) > 0:
     start_hour = int(sys.argv[1])
@@ -22,13 +26,11 @@ hour = 0
 pickle_list = glob.glob(pickles + 'rel-%dhr*.pickle' % hour)
 
 
-
 code = 'HOU'
 if code == 'HOU':
     ax_extent = [-120, -70, 5, 55]
 elif code == 'SEUS':
     ax_extent = [-90, -75, 30, 37.5]
-
 
 
 som_classes = pd.read_csv('som_cluster_10yr_700hpa_00utc.csv',
@@ -42,7 +44,7 @@ def get_som(timestamp):
 
 # Get lats, lons for plotting
 ds = xr.open_mfdataset(
-            '/lcrc/group/earthscience/rjackson/MERRA2/hou_extended/DUCMASS*.nc')
+            '/lcrc/group/earthscience/rjackson/MERRA2/hou_reduced/DUCMASS*.nc')
 print(ds.time)
 x = ds["DUCMASS"].values
 lon = ds["lon"].values
@@ -60,7 +62,7 @@ lat = lat[lat_inds]
 
 ds.close()
 
-classification = ['Good', 'Moderate', 'Unhealthy Sens.', 'Unhealthy', 'Hazardous']
+classification = ['Good', 'Moderate', 'Unhealthy Sens.', '(V.) Unhealthy', 'Hazardous']
 k = 0
 lon, lat = np.meshgrid(lon, lat)
 soms = []
@@ -68,10 +70,11 @@ pre_trough = [0, 1, 2, 3]
 post_trough = [7, 11, 14, 15]
 anticyclonic = [4, 8, 12, 13]
 transitional = [5, 6, 9, 10]
+all_regimes = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
 if len(sys.argv) > 3:
     regime = sys.argv[3]
 else:
-    regime = ""
+    regime = "all_regimes"
 
 num_points = np.zeros(5)
 mean_relevances = {}
@@ -99,26 +102,39 @@ for k in input_keys:
     if variable[-4:] == "MASS":
         variable = variable[:-4] + "C" + variable[-4:]
     ds = xr.open_mfdataset(
-            '/lcrc/group/earthscience/rjackson/MERRA2/hou_extended/%s*.nc' % variable)
+            '/lcrc/group/earthscience/rjackson/MERRA2/hou_reduced/%s*.nc' % variable)
     x[k] = ds[variable].values
     mins[k] = x[k].min()
     maxs[k] = x[k].max()
     ds.close()
 
+average_rels = []
+ninety_nine_nine_rel = 0
+
 for picks in pickle_list:
     p = open(picks, mode='rb')
     relevances = pickle.load(p)
     classes = relevances['output'].numpy().argmax(axis=1)
+    
     aqi = relevances['aqi'].argmax(axis=1)
     for k in input_keys:
         relevances[k] = relevances[k].numpy()
     
+    
     for j in range(len(classes)):
-        for k in input_keys:
-            r_min = relevances[k][j, :, :].min()
-            r_max = relevances[k][j, :, :].max()
-            maxv = np.max(np.abs(relevances[k])[j, :, :])
-            relevances[k][j, :, :] = relevances[k][j, :, :] / maxv
+        rel_array = np.squeeze(
+                    np.stack([relevances[k][j, :, :] for k in input_keys], axis=0))
+        ninety_nine_nine_rel = np.max([ninety_nine_nine_rel, np.nanpercentile(rel_array, 99.9)])
+        
+        #average_rels.append(np.nanmean(rel_array))
+        #rel_array = np.where(rel_array > np.nanpercentile(rel_array, 99.9), rel_array,
+        #        np.nanpercentile(rel_array, 99.9))
+        rel_array = np.where(rel_array >= 0, rel_array, 0)
+        r_mean = np.nanmean(rel_array)
+        for l, k in enumerate(input_keys):
+            r = rel_array[l, :, :] / r_mean
+            r = r[:, :, np.newaxis]
+            relevances[k][j, :, :] = r
     true_times = np.array([x in pre_trough for x in soms])
 
     soms = np.array([get_som(x) for x in relevances['time']])
@@ -132,6 +148,7 @@ for picks in pickle_list:
         
         if regime == "":
             if hours[j] >= start_hour and hours[j] <= end_hour:
+                
                 num_points[classes[j]] = num_points[classes[j]] + 1 
                 for k in input_keys:
                     mean_relevances[k][classes[j], :, :] += np.squeeze(
@@ -168,9 +185,9 @@ states_provinces = cfeature.NaturalEarthFeature(
         facecolor='none')
 
 for key in input_keys:
-    fig, ax = plt.subplots(3, 1,
+    fig, ax = plt.subplots(1, 4,
             subplot_kw=dict(projection=ccrs.PlateCarree()),
-            figsize=(10, 15))
+            figsize=(8, 3))
     for l in range(1, 4):     
         r = np.squeeze(mean_relevances[key][l - 1])
         m = means[key][l - 1, :, :] 
@@ -193,12 +210,7 @@ for key in input_keys:
             #mmin = -mmax
             #mmax = -1
             mmin = 0
-            c = ax[l - 1].pcolormesh(lon, lat, m,
-                    vmin=mmin, vmax=mmax, cmap='Greys', label='%s' % key[7:])
-            d = ax[l - 1].contourf(lon, lat, r, cmap='coolwarm', alpha=0.5,
-                    levels=[-1, -0.1, 0.1, 1])
-            bar = plt.colorbar(c, label='%s [$kg\ m^{-2}$]' % key[6:],
-                    ax=ax[l - 1])
+            d = ax[l - 1].pcolormesh(lon, lat, r, cmap='coolwarm', norm=LogNorm(1e-1, 10))
         else:
             mv = means[key[:-1] + "V"][l - 1, :, :]
             print(np.mean(m), np.mean(mv))
@@ -213,12 +225,23 @@ for key in input_keys:
                     levels=[-1, -0.1, 0.1,  1])
         #ax[l - 1].set_extent(ax_extent)
         ax[l - 1].coastlines()
+        gl = ax[l - 1].gridlines(crs=ccrs.PlateCarree(), draw_labels=True,
+                      linewidth=2, color='gray', alpha=0.5, linestyle='--')
         ax[l - 1].add_feature(states_provinces)
         ax[l - 1].add_feature(cfeature.BORDERS)
-        ax[l - 1].set_title(classification[l - 1] + ' %dhr' % (start_hour))
+        ax[l - 1].set_title(classification[l - 1])
         ax[l - 1].set_xlabel('Latitude')
         ax[l - 1].set_ylabel('Longitude')
-    fig.savefig('output_relevance_pngs/relevance_mean%s%dhr-%s.png' % (regime, start_hour, key), dpi=150,
+        gl.xlines = False
+        gl.ylines = False
+        gl.xformatter = LONGITUDE_FORMATTER
+        gl.yformatter = LATITUDE_FORMATTER
+        gl.ylabels_right = False
+        if l > 0: 
+            gl.ylabels_left = False
+    bar = plt.colorbar(d, label='Relevance %s' % key[6:], ax=ax[-1])
+    ax[-1].axis('off')
+    fig.savefig('output_relevance_pngs/relevance_mean%s%dhr-%s-small.png' % (regime, start_hour, key), dpi=150,
             bbox_inches='tight')
     plt.close(fig)
 

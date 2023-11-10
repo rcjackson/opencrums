@@ -10,6 +10,11 @@ import numpy as np
 import sys
 import matplotlib.ticker as mticker
 
+import cartopy.io.shapereader as shpreader
+import shapely.geometry as sgeom
+from shapely.ops import unary_union
+from shapely.prepared import prep
+
 from datetime import timedelta
 from matplotlib import cm
 from matplotlib.colors import ListedColormap, LogNorm
@@ -26,12 +31,27 @@ if code == 'HOU':
 elif code == 'SEUS':
     ax_extent = [-90, -75, 30, 37.5]
 
-if len(sys.argv) > 1:
-    regime = sys.argv[1]
+land_s = sys.argv[1]
+if land_s.lower() == "land":
+    land_m = 1
 else:
-    regime = ""
+    land_m = 0
+
+if len(sys.argv) > 2:
+    regime = sys.argv[2]
+else:
+    regime = "all_regimes"
 som_classes = pd.read_csv('som_cluster_10yr_700hpa_00utc.csv',
         parse_dates=True, index_col="date")
+
+land_shp_fname = shpreader.natural_earth(resolution='50m',
+                                       category='physical', name='land')
+
+land_geom = unary_union(list(shpreader.Reader(land_shp_fname).geometries()))
+land = prep(land_geom)
+
+def is_land(x, y):
+    return land.contains(sgeom.Point(x, y))
 
 def get_som(timestamp):
     nearest = np.argmin(np.abs(som_classes.index - timestamp))
@@ -61,6 +81,14 @@ ds.close()
 classification = ['Good', 'Moderate', 'Unhealthy Sens.', 'Unhealthy', 'Hazardous']
 k = 0
 lon, lat = np.meshgrid(lon, lat)
+
+land_mask = np.zeros_like(lon)
+land_mask = np.where(np.logical_and.reduce((lon > -100, lon < -93, lat > 28, lat < 32)), 1, 0)
+#for i in range(lon.shape[0]):
+#    for j in range(lat.shape[1]):
+#        land_mask = is_land(lon[i, j], lat[i, j])
+        
+print(land_mask)
 soms = []
 pre_trough = [0, 1, 2, 3]
 post_trough = [7, 11, 14, 15]
@@ -92,7 +120,7 @@ for picks in pickle_list:
     soms = np.array([get_som(x) for x in relevances['time']])
  
     classes = relevances['output'].numpy().argmax(axis=1)
-    #aqi = relevances['aqi'].argmax(axis=1)
+    #classes = relevances['aqi'].argmax(axis=1)
     for j in range(len(classes)):
         r_max = -np.inf
         r_min = np.inf
@@ -100,9 +128,6 @@ for picks in pickle_list:
             r_max = np.max([r_max, relevances[k][j, :, :].max()])
             r_min = np.min([r_min, relevances[k][j, :, :].min()])
 
-        for k in input_keys:
-            relevances[k][j, :, :] = (relevances[k][j, :, :] - r_min) / (
-                    r_max - r_min)
 
     num_grid_points = np.prod(lat.shape)
     for j in range(len(classes)):
@@ -115,121 +140,63 @@ for picks in pickle_list:
         num_points[classes[j]] = num_points[classes[j]] + 1
         sum_all_r = np.squeeze(np.max(np.concatenate(
             [relevances[k][j, :, :] for k in input_keys])))
-        #relevances[k] = np.where(relevances[k] > 1 / (num_grid_points * 17), relevances[k], 0)
         rel_array = np.squeeze(
                     np.stack([relevances[k][j, :, :] for k in input_keys], axis=0))
          
-        #rel_array = np.where(rel_array > 0, rel_array, np.nan)
-        rel_array = (rel_array - np.nanmin(rel_array)) / (np.nanmax(rel_array) - np.nanmin(rel_array))
-        rel_array[~np.isfinite(rel_array)] = 0
+        rel_array = rel_array / np.nanmean(rel_array)
+        #rel_array[rel_array < 1] = -np.inf
         max_rel_features = np.squeeze(np.argmax(rel_array, axis=0))
         for num, k in enumerate(input_keys):
-#            print(classes[j])
             mean_relevances[k][classes[j], :, :] += np.squeeze(
                     rel_array[num, :, :]) 
             max_rel_feature[classes[j], num, :, :] += max_rel_features == num * 1
-            
+
+for i in range(5):
+    for j in range(len(input_keys)):
+        max_rel_feature[i, j] = np.where(land_mask == land_m, max_rel_feature[i, j], -1)
+
 is_relevant_feature = max_rel_feature.max(axis=1) > 0
-max_rel_feature = max_rel_feature.argsort(axis=1).astype(float)[:, -2, :, :]
-#max_rel_feature[~is_relevant_feature] = np.nan
 
-print(num_points)
-r_max = -np.inf
-for j in range(5):
-    for k in input_keys:
-        mean_relevances[k][j,:,:] /= num_points[j]
-        r_max = np.max([r_max, np.percentile(mean_relevances[k][j, :, :], 95)])
-
-states_provinces = cfeature.NaturalEarthFeature(
-        category='cultural',
-        name='admin_1_states_provinces_lines',
-        scale='50m',
-        facecolor='none')
-
-rel = {}
-rel_std = {}
-for key in input_keys:
-    rel[key] = np.zeros(5)
-    rel_std[key] = np.zeros(5)
-    for l in range(1, 6):     
-        r = np.squeeze(mean_relevances[key][l - 1])
-        print(r.max())
-        rel[key][l - 1] = r.mean() 
-        rel_std[key][l - 1] = r.std()
-
-for j in range(5):
-    relevance = np.squeeze(
-        np.stack([mean_relevances[k][j, :, :] for k in input_keys], axis=0))
-    for k in range(relevance.shape[1]):
-        for l in range(relevance.shape[2]):
-            max_relevance[j, k, l] = relevance[int(max_rel_feature[j, k, l]), k, l]
-
-#max_rel_feature = np.where(max_relevance > 0.1, max_rel_feature, np.nan)    
+max_rel_feature = max_rel_feature.sum(axis=2).sum(axis=2)
 rowLabels = [x[6:] for x in input_keys]
-#colLabels = ['Quintile 1 AQI', 'Quintile 2 AQI', 'Quintile 3 AQI', 
-#             'Quintile 4 AQI', 'Quintile 5 AQI']
-colLabels = classification
+colLabels = ['Quintile 1 AQI', 'Quintile 2 AQI', 'Quintile 3 AQI', 
+             'Quintile 4 AQI', 'Quintile 5 AQI']
 cell_text = []
-fig, ax = plt.subplots(2, 4, figsize=(10, 6),
-        subplot_kw=dict(projection=ccrs.PlateCarree()))
+fig, ax = plt.subplots(1, 5, figsize=(15, 5))
 i = 0
 j = 0
-tab20 = cm.get_cmap('tab20', 20)
-tab16 = tab20(np.arange(0, 16, 1))
-tab16 = ListedColormap(tab16)
 for i, k in enumerate(input_keys):
     if "MASS" in k:
         key_loc = k.index("MASS")
         new_key = k[:key_loc] + "C" + "MASS"
         input_keys[i] = new_key
 
-for j in range(3):
-    #max_relevance[j] = (max_relevance[j] - max_relevance[j].min()) / (max_relevance[j].max() - max_relevance[j].min())
-    cbar_kwargs = {'ticks': np.arange(0, len(input_keys), 1) + 0.5,
-            'tick_labels': [x[6:] for x in input_keys]}
-    c = ax[0, j].pcolormesh(lon, lat, max_rel_feature[j], 
-            cmap=tab16, vmin=0, vmax=16)
-    d = ax[1, j].pcolormesh(lon, lat, max_relevance[j],
-            cmap='Reds', vmin=0, vmax=1)
-    ax[0, j].coastlines()
-    ax[0, j].set_ylabel('Latitude [$^{\circ}]$')
-    ax[0, j].set_xlabel('Longitude [$^{\circ}]$)')
-    ax[0, j].set_title(colLabels[j])
-    gl = ax[0, j].gridlines(crs=ccrs.PlateCarree(), draw_labels=True,
-                      linewidth=2, color='gray', alpha=0.5, linestyle='--')
-    ax[0, j].add_feature(states_provinces)
-    ax[0, j].add_feature(cfeature.BORDERS)
-    ax[0, j].set_xlabel('Latitude')
-    ax[0, j].set_ylabel('Longitude')
-    gl.xlocator = mticker.FixedLocator([-115, -95, -75])
-    gl.xlines = False
-    gl.xformatter = LONGITUDE_FORMATTER
-    gl.yformatter = LATITUDE_FORMATTER
-    gl.ylabels_right = False
-    if j > 0:
-       gl.ylabels_left = False
-    gl.ylines = False
+which_variables = {"SO4CMASS": 0, "DUCMASS": 1, "BCCMASS": 2, "DMSCMASS": 3, "OCCMASS": 4}
+my_hist = np.zeros((5, 5))
+for j in range(5):
+    l = 0
+    for i, k in enumerate(input_keys):
+        var_name = k.split("_")[1]
+        if var_name in list(which_variables.keys()):
+            l = which_variables[var_name]
+            my_hist[j, l] = max_rel_feature[j, i] / num_points[j]
+            l = l + 1
 
-    ax[1, j].coastlines()
-    ax[1, j].set_ylabel('Latitude [$^{\circ}]$')
-    ax[1, j].set_xlabel('Longitude [$^{\circ}]$)')
-    ax[1, j].set_title(colLabels[j])
-
-    
-cbar = plt.colorbar(c, ax=ax[0, 5],
-                    ticks=cbar_kwargs['ticks'], 
-                    label='Most relevant feature')
-ax[0, 5].axis('off')
-cbar.ax.set_yticklabels(cbar_kwargs['tick_labels'])
-cbar2 = plt.colorbar(d, ax=ax[1, 5],
-                    label='Maximum relevance')
-ax[1, 5].axis('off')
-
-#for k in rel.keys():
-#    cell_text.append(['%1.1f' % rel[k][l] for l in range(5)])
-#ax.table(cellText=cell_text, rowLabels=rowLabels, colLabels=colLabels,
-#        loc='center')
-
-fig.savefig('relevance%s_second.png' % regime, bbox_inches='tight')
+width = 0.15
+fig, ax = plt.subplots(1, 1)
+x_labels = classification
+x_ticks = [1, 2, 3, 4, 5]
+for j, key in enumerate(which_variables):
+    offset = width * (j - 2.5)
+    rects = ax.bar(np.array(x_ticks) + offset, my_hist[:, j], label=key, width=0.2)
+    #ax.bar_label(rects, padding=3)
+ax.set_xticks(x_ticks)
+ax.set_xticklabels(x_labels)
+ax.set_ylabel("Total points / number of hours")
+ax.set_ylim([0, 50])
+ax.set_xlim([0.5, 3.5])
+ax.set_xlabel("EPA AirNow PM2.5 Class")
+ax.legend()
+fig.savefig('relevance_hist_%s_%s.png' % (land_s, regime), bbox_inches='tight')
 plt.close(fig)
 

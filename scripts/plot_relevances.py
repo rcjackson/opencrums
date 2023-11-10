@@ -5,7 +5,7 @@ import pickle
 import xarray as xr
 import numpy as np
 
-pickles = '/lcrc/group/earthscience/rjackson/opencrums/scripts/relevance_pickles_large/'
+pickles = '/lcrc/group/earthscience/rjackson/opencrums/scripts/relevance_pickles_large_new/'
 out_plot_path = '/lcrc/group/earthscience/rjackson/merra_relevances/'
 pickle_list = glob.glob(pickles + '*.pickle')
 print(pickle_list)
@@ -46,7 +46,7 @@ for picks in pickle_list:
     print(lon.shape)
     input_keys = []
     for key in relevances.keys():
-        if "input_" in key:
+        if "input" in key:
             input_keys.append(key)
 
     for j in range(10):
@@ -56,15 +56,25 @@ for picks in pickle_list:
             figsize=(13,13))
         sum_all_r = np.sum(np.concatenate(
             [relevances[k][j, :, :] for k in input_keys]))
+        r_array = np.stack([relevances[k][j, :, :] for k in input_keys])
+        r_array = np.where(np.abs(r_array) < np.nanpercentile(r_array, 99.9), r_array, np.nan)
         for key in input_keys:
             r = np.squeeze(relevances[key][j, :, :])
-            r = r / np.max(np.abs(r))
-            c = ax[int(i/4), i % 4].contourf(lon, lat, r,
-                cmap='coolwarm', levels=np.linspace(-1, 1, 100))
-        
-        
+            #r = np.where(r > 0, r, np.nan)
+            #print(np.nanmin(r_array), np.nanmax(r_array))
+            r = np.where(np.abs(r) < np.nanpercentile(np.abs(r_array), 99.9), r,
+                    np.nanpercentile(np.abs(r_array), 99.9))
+            #r = (r - np.nanmin(r_array)) / (np.nanmax(r_array) - np.nanmin(r_array))
+            r = r / np.nanmean(r_array)
+            #r = np.where(np.abs(r) > 1e-3, r, np.nan)
+            #print(np.nanmax(r), np.nanmax(r), np.nanmedian(r), np.nanpercentile(r, 99))
+
+            c = ax[int(i/4), i % 4].pcolormesh(lon, lat, r,
+                vmin=0, vmax=10, cmap='coolwarm')
+ 
             ax[int(i/4), i % 4].coastlines()
-            ax[int(i/4), i % 4].set_title(str(relevances['time'][j]) + ' :%s \n' % classification[classes[j]] + key.split("_")[1])
+            ax[int(i/4), i % 4].set_title(
+                str(relevances['time'][j]) + ' :%s \n' % classification[classes[j]] + key.split("_")[1])
             ax[int(i/4), i % 4].set_xlabel('Latitude')
             ax[int(i/4), i % 4].set_ylabel('Longitude')
             plt.colorbar(c, ax=ax[int(i/4), i % 4])
